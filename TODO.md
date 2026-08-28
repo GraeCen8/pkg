@@ -2,11 +2,6 @@
 
 Backlog and roadmap for `pkg`. Roughly priority-ordered; checked items are done.
 
-## Next
-
-- [ ] **Dogfood on this machine** — give `short` a real `~/dots` root, run
-      `pkg sync`, fix what hurts.
-
 ## v0.2 (in progress)
 
 - [x] **Git-backed roots** — per-root `[git] url`; `pkg sync` runs

@@ -14,11 +14,11 @@ from pkg.colors import err, out
 
 TEMPLATE = """[config]
 mode = "pkg"
-# stow = ["zsh"]       # these configs mirror into $HOME (GNU stow style)
+# stow = []       # these configs mirror into $HOME (GNU stow style)
 # mode = "stow"        # make every config stow-style
 
 # [modules]
-# on = ["nvim"]        # top-level dirs that are their own roots
+# on = []        # top-level dirs that are their own roots
 #                      # (own pkg.toml + configs/)
 
 # [[system]]
