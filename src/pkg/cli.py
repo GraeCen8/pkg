@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
-from pkg import __version__, linker
+from pkg import __version__, colors, linker
 from pkg import config as cfg
 from pkg import pms as pms_mod
+from pkg.colors import err, out
 
 TEMPLATE = """[config]
 mode = "pkg"
@@ -28,6 +31,14 @@ mode = "pkg"
 # [git]
 # url = "git@github.com:you/dots.git"
 """
+
+_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+_LINK_MARKS = {
+    "ok": (out.green, "="),
+    "new": (out.cyan, "+"),
+    "conflict": (out.red, "!"),
+    "broken": (out.yellow, "?"),
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -62,7 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="show package and link state")
     sub.add_parser("unlink", help="remove only symlinks pkg created")
 
-    i = sub.add_parser("init", help="scaffold a root: pkg.toml + configs/")
+    i = sub.add_parser("init", help="scaffold a root at <dir>: pkg.toml + configs/")
+    i.add_argument("target", help="dir to scaffold, e.g. ~/dots or .")
     i.add_argument("--force", action="store_true")
 
     for sp in sub.choices.values():
@@ -70,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
             "-R",
             "--root",
             default=None,
-            help="root dir (default: cwd, else ~/dots)",
+            help="root dir (overrides the remembered root)",
         )
     return parser
 
@@ -78,13 +90,23 @@ def build_parser() -> argparse.ArgumentParser:
 def find_root(explicit: str | None) -> Path:
     if explicit:
         d = Path(explicit).expanduser()
+        remember = True
     elif Path("pkg.toml").is_file():
         d = Path.cwd()
+        remember = True
     else:
-        d = cfg.ROOT_DEFAULT
+        mem = linker.remembered_root()
+        if mem and (mem / "pkg.toml").is_file():
+            d = mem
+            remember = False
+        else:
+            d = cfg.ROOT_DEFAULT
+            remember = False
     d = d.resolve()
     if not (d / "pkg.toml").is_file():
-        sys.exit(f"{d}: no pkg.toml found (run `pkg init` to create one)")
+        sys.exit(err.red(f"{d}: no pkg.toml found (run `pkg init <dir>` to create one)"))
+    if remember:
+        linker.remember_root(d)
     return d
 
 
@@ -101,49 +123,87 @@ def pull_roots(root_dir: Path, root_filter: list[cfg.Root] | None = None) -> Non
         if not root.git_url:
             continue
         if not (root.dir / ".git").exists():
-            sys.exit(f"{root.dir}: declares [git] url but is not a git checkout")
-        print(f"[git] pull: {root.dir}")
+            sys.exit(err.red(f"{root.dir}: declares [git] url but is not a git checkout"))
+        print(f"  {out.cyan('~')} pull {out.dim(str(root.dir))}")
         if (
             subprocess.run(
                 ["git", "-C", str(root.dir), "pull", "--ff-only"], check=False
             ).returncode
             != 0
         ):
-            sys.exit(f"[git] pull failed for {root.dir}")
+            sys.exit(err.red(f"git pull failed for {root.dir}"))
 
 
 def print_links(items: list[linker.LinkItem]) -> None:
     for item in items:
-        marker = {"ok": "=", "new": "+", "conflict": "!", "broken": "?"}[linker.item_status(item)]
-        print(f"  {marker} {item.target}")
+        color, mark = _LINK_MARKS[linker.item_status(item)]
+        print(f"  {color(mark)} {item.target}")
+
+
+def _spinner(message: str) -> threading.Event:
+    stop = threading.Event()
+
+    def spin() -> None:
+        i = 0
+        while not stop.is_set():
+            sys.stdout.write(f"\r  {out.cyan(_SPINNER[i % len(_SPINNER)])} {message}")
+            sys.stdout.flush()
+            time.sleep(0.08)
+            i += 1
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+    threading.Thread(target=spin, daemon=True).start()
+    return stop
+
+
+def _system_install(manager: pms_mod.PackageManager, missing: list[str], yes: bool) -> int:
+    label = ", ".join(missing)
+    use_spinner = colors.enabled(sys.stdout)
+    if use_spinner:
+        stop = _spinner(f"installing {label}")
+    else:
+        print(f"  installing {label} ...")
+    rc = manager.install(missing)
+    if use_spinner:
+        stop.set()
+    if rc:
+        still = manager.check_many(missing)
+        if still:
+            print(f"  {out.red('error')}: package(s) not found: {', '.join(still)}")
+        else:
+            print(out.red("  error: install failed"))
+        return rc
+    print(f"  {out.green('ok')} — installed {len(missing)} package(s)")
+    return 0
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
     root_dir = find_root(args.root)
     home = host()
     manager = get_manager(root_dir)
-    print(f"manager: {manager.label}")
+    print(out.dim(f"manager: {manager.label}"))
     if any(root.git_url for root in cfg.roots_in_order(root_dir)):
-        print("== git ==")
+        print(out.section("== git =="))
         for root in cfg.roots_in_order(root_dir):
             if root.git_url:
-                print(f"  ~ pull {root.dir} ({root.git_url})")
-    print("== system ==")
+                print(f"  {out.cyan('~')} pull {out.dim(str(root.dir))} ({root.git_url})")
+    print(out.section("== system =="))
     problems: list[str] = []
     if not args.configs_only:
         for pkg in manager.check_many(cfg.all_packages(root_dir)):
-            print(f"  + {pkg}")
+            print(f"  {out.green('+')} {pkg}")
         if manager.check_many(cfg.all_packages(root_dir)):
             problems.append("packages to install")
-    print("== links ==")
+    print(out.section("== links =="))
     items = linker.plan(root_dir, home)
     print_links(items)
     if args.prune:
         for target in linker.orphaned(items):
-            print(f"  - {target} (pruned on `sync --prune`)")
+            print(f"  {out.yellow('-')} {target} (pruned on `sync --prune`)")
     problems.extend(linker.find_conflicts(items, home))
     for problem in problems:
-        print(f"  ! {problem}", file=sys.stderr)
+        print(f"  {out.red('!')} {problem}", file=sys.stderr)
     return 1 if problems else 0
 
 
@@ -157,63 +217,69 @@ def cmd_sync(args: argparse.Namespace) -> int:
         pull_roots(root_dir, roots)
 
     if not args.configs_only:
+        print(out.section("== system =="))
         missing = manager.check_many(cfg.all_packages(root_dir))
         if missing:
-            print(f"[system] {len(missing)} packages to install: {', '.join(missing)}")
             if args.yes:
-                if manager.install(missing):
-                    sys.exit("[system] install failed")
+                rc = _system_install(manager, missing, yes=True)
             elif sys.stdin.isatty():
-                answer = input("Install these packages? [y/N] ")
+                answer = input(f"  install these packages? {out.cyan('[y/N] ')}")
                 if answer.lower() not in ("y", "yes"):
-                    print("aborted")
+                    print(out.red("  aborted"))
                     return 1
-                if manager.install(missing):
-                    sys.exit("[system] install failed")
+                rc = _system_install(manager, missing, yes=True)
             else:
-                sys.exit("[system] packages missing: rerun with --yes")
+                rc = 1
+                print(err.red("[system] packages missing: rerun with --yes"))
+            if rc:
+                return 1
         else:
-            print("[system] all packages present")
+            print(f"  {out.green('all packages present')}")
 
     if not args.system_only:
+        print(out.section("== links =="))
         items = linker.plan(root_dir, home)
         problems = linker.find_conflicts(items, home)
         if problems and not args.force:
-            print("conflicts:", file=sys.stderr)
+            print(err.red("conflicts:"))
             for problem in problems:
-                print(f"  - {problem}", file=sys.stderr)
-            sys.exit("aborting; use --force to replace")
+                print(f"  {out.red('-')} {problem}", file=sys.stderr)
+            sys.exit(err.red("aborting; use --force to replace"))
         try:
             created = linker.apply(items, home, force=args.force)
         except linker.ConflictError as exc:
-            sys.exit(f"error: {exc}")
+            sys.exit(err.red(f"error: {exc}"))
         for item in created:
-            print(f"  + {item.target}")
+            print(f"  {out.green('+')} {item.target}")
         if not created:
-            print("[links] all targets already linked")
+            print(out.dim("  all targets already linked"))
         if problems:
-            print(f"[links] replaced {len(problems)} existing target(s)")
+            print(out.yellow(f"  replaced {len(problems)} existing target(s)"))
         if args.prune:
             removed, notices = linker.prune(items, home)
             for notice in notices:
-                print(f"  ~ {notice}")
-            print(f"[prune] removed {removed} orphan(s)")
+                print(f"  {out.yellow('~')} {notice}")
+            print(f"  {out.green(f'pruned {removed} orphan(s)')}")
 
     declared = cfg.all_packages(root_dir)
     previously = linker.load_installed()
     dropped = [pkg for pkg in previously if pkg not in declared]
     linker.record_installed(declared)
     if dropped:
-        print("[prune] previously declared, now removed from manifest (never auto-removed):")
+        print(out.section("== dropped =="))
+        print(out.yellow("  previously declared, now removed from manifest (never auto-removed):"))
         for pkg in dropped:
-            print(f"  ? {pkg}")
+            print(f"  {out.red('?')} {pkg}")
 
-    for root in roots:
-        for hook in root.post_hooks:
-            print(f"[hook] {hook}")
+    hooks = [(root, hook) for root in roots for hook in root.post_hooks]
+    if hooks:
+        print(out.section("== hooks =="))
+        for root, hook in hooks:
+            print(f"  {out.magenta('[hook]')} {hook}")
             if subprocess.run(["sh", "-c", hook], check=False).returncode != 0:
-                sys.exit(f"hook failed: {hook}")
-    print("in sync")
+                sys.exit(err.red(f"hook failed: {hook}"))
+
+    print(out.green(out.bold("in sync")))
     return 0
 
 
@@ -221,45 +287,49 @@ def cmd_status(args: argparse.Namespace) -> int:
     root_dir = find_root(args.root)
     home = host()
     manager = get_manager(root_dir)
-    print(f"manager: {manager.label}")
+    print(out.dim(f"manager: {manager.label}"))
     for root in cfg.roots_in_order(root_dir):
         if root.git_url:
-            print(f"git: {root.dir}: {root.git_url}")
-    print("== system ==")
+            print(f"{out.cyan('git')}: {root.dir}: {root.git_url}")
+    print(out.section("== system =="))
     for pkg in cfg.all_packages(root_dir):
         state = "installed" if manager.check(pkg) else "missing"
-        print(f"  {state:10} {pkg}")
-    print("== links ==")
+        color = out.green if state == "installed" else out.red
+        print(f"  {color(state):10} {pkg}")
+    print(out.section("== links =="))
     items = linker.plan(root_dir, home)
     print_links(items)
     wanted = {str(item.target) for item in items}
     stale = [target for target in linker.load_state_map() if target not in wanted]
     for target in stale:
-        print(f"  - {target} (not in manifest)")
+        print(f"  {out.yellow('-')} {target} (not in manifest)")
     return 0
 
 
 def cmd_unlink(args: argparse.Namespace) -> int:
-    print(f"removed {linker.unlink(host())} symlink(s)")
+    removed = linker.unlink(host())
+    verb = "symlink(s)" if removed == 1 else "symlinks"
+    print(f"  {out.green(f'removed {removed} {verb}')}")
     return 0
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    d = Path(args.root or cfg.ROOT_DEFAULT).expanduser().resolve()
+    d = Path(args.target).expanduser().resolve()
     (d / "configs").mkdir(parents=True, exist_ok=True)
     pkg_toml = d / "pkg.toml"
     if pkg_toml.exists() and not args.force:
-        print(f"{pkg_toml}: already exists (use --force to overwrite)")
+        print(f"{pkg_toml}: already exists {out.yellow('(use --force to overwrite)')}")
     else:
         pkg_toml.write_text(TEMPLATE)
-        print(f"wrote {pkg_toml}")
-    print(f"layout: {d}")
-    print("        configs/")
-    print("drop configs into configs/, then run `pkg sync`")
+        print(f"  {out.green('wrote')} {pkg_toml}")
+    linker.remember_root(d)
+    print(f"  layout: {out.cyan(d)}")
+    print("          configs/")
+    print("  drop configs into configs/, then run `pkg sync`")
     return 0
 
 
-_COMMANDS = {
+_CMD = {
     "plan": cmd_plan,
     "sync": cmd_sync,
     "status": cmd_status,
@@ -275,9 +345,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
-        return _COMMANDS[args.cmd](args)
+        return _CMD[args.cmd](args)
     except cfg.ConfigError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(err.red(f"error: {exc}"), file=sys.stderr)
         return 1
 
 

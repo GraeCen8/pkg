@@ -193,6 +193,13 @@ def test_record_installed_roundtrip(tmp_path, state_home):
     assert linker.load_installed() == ["zsh"]
 
 
+def test_remember_root_roundtrip(tmp_path, state_home):
+    target = tmp_path / "dots"
+    assert linker.remembered_root() is None
+    linker.remember_root(target)
+    assert linker.remembered_root() == target
+
+
 def test_duplicate_target_conflict(tmp_path, state_home):
     root = make_root(
         tmp_path,

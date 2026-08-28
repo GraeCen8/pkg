@@ -35,6 +35,11 @@ class PackageManager:
     def _run(self, cmd: list[str]) -> subprocess.CompletedProcess:
         return subprocess.run(cmd, check=False)
 
+    def _run_silent(self, cmd: list[str]) -> int:
+        return subprocess.run(
+            list(cmd), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+        ).returncode
+
     def _sudo(self, cmd: list[str]) -> list[str]:
         if os.geteuid() == 0:
             return cmd
@@ -60,14 +65,14 @@ class Apt(PackageManager):
         if not missing:
             return 0
         if not self._updated:
-            if self._run(self._sudo(["apt-get", "update"])).returncode != 0:
+            if self._run_silent(self._sudo(["apt-get", "update"])) != 0:
                 return 1
             self._updated = True
         still = self.check_many(missing)
         if (
-            self._run(
+            self._run_silent(
                 self._sudo(["apt-get", "install", "-y", "--no-install-recommends", *still])
-            ).returncode
+            )
             != 0
         ):
             return 1
@@ -85,10 +90,7 @@ class Pacman(PackageManager):
         missing = self.check_many(packages)
         if not missing:
             return 0
-        if (
-            self._run(self._sudo(["pacman", "-S", "--noconfirm", "--needed", *missing])).returncode
-            != 0
-        ):
+        if self._run_silent(self._sudo(["pacman", "-S", "--noconfirm", "--needed", *missing])) != 0:
             return 1
         return self._verify(missing)
 
@@ -104,7 +106,7 @@ class Dnf(PackageManager):
         missing = self.check_many(packages)
         if not missing:
             return 0
-        if self._run(self._sudo(["dnf", "install", "-y", *missing])).returncode != 0:
+        if self._run_silent(self._sudo(["dnf", "install", "-y", *missing])) != 0:
             return 1
         return self._verify(missing)
 
@@ -120,10 +122,7 @@ class Zypper(PackageManager):
         missing = self.check_many(packages)
         if not missing:
             return 0
-        if (
-            self._run(self._sudo(["zypper", "--non-interactive", "install", *missing])).returncode
-            != 0
-        ):
+        if self._run_silent(self._sudo(["zypper", "--non-interactive", "install", *missing])) != 0:
             return 1
         return self._verify(missing)
 
@@ -139,7 +138,7 @@ class Apk(PackageManager):
         missing = self.check_many(packages)
         if not missing:
             return 0
-        if self._run(self._sudo(["apk", "add", "--no-interactive", *missing])).returncode != 0:
+        if self._run_silent(self._sudo(["apk", "add", "--no-interactive", *missing])) != 0:
             return 1
         return self._verify(missing)
 
@@ -171,7 +170,7 @@ class Brew(PackageManager):
         missing = self.check_many(packages)
         if not missing:
             return 0
-        if self._run([self._brew, "install", *missing]).returncode != 0:
+        if self._run_silent([self._brew, "install", *missing]) != 0:
             return 1
         return self._verify(missing)
 

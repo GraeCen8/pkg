@@ -101,6 +101,19 @@ def record_installed(packages: list[str]) -> None:
     _write_db(db)
 
 
+def remember_root(path: Path) -> None:
+    state_dir().mkdir(parents=True, exist_ok=True)
+    (state_dir() / "root").write_text(str(path))
+
+
+def remembered_root() -> Path | None:
+    try:
+        value = (state_dir() / "root").read_text().strip()
+    except OSError:
+        return None
+    return Path(value) if value else None
+
+
 def _scan_stow(src: Path, out: list[Path]) -> None:
     for child in sorted(src.iterdir()):
         if child.is_dir() and not child.is_symlink():

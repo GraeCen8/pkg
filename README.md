@@ -137,11 +137,20 @@ pkg sync       # sync the machine to the manifest: ─ install pkgs (prompt
                #   --system-only | --configs-only | --force | --yes | --prune | --no-git
 pkg status     # pkg installed/missing; links ok/drifted
 pkg unlink     # remove only symlinks pkg created (state file)
-pkg init       # scaffolds the root: pkg.toml + configs/
+pkg init <dir> # scaffold a root at <dir>: pkg.toml + configs/
+               #   (e.g. `pkg init ~/dots` or `pkg init .`)
 ```
+
+`-R/--root <dir>` overrides the root. The last root you point at (via `-R` or
+`pkg init`) is remembered, so plain `pkg sync` works from anywhere — you only
+ever type the root once.
 
 ## Behavior rules
 
+- Output is colored when the terminal supports it (and `NO_COLOR` not set);
+  installs run quietly — you see `installing: pkg …` with a spinner, not the
+  package manager's own output — and only packages that genuinely couldn't be
+  installed are called out as "not found".
 - Package manager auto-detected from `/etc/os-release` (`ID` + `ID_LIKE`)
   → apt/pacman/dnf/zypper/apk, or `brew` on macOS. Override with
   `[manager] name` in the top root.
