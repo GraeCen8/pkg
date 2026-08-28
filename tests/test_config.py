@@ -111,3 +111,102 @@ def test_top_only_manager_warns(tmp_path, capsys):
     d = write_root(tmp_path, '[modules]\non = ["m"]\n', modules)
     cfg.roots_in_order(d)
     assert "applies only at the top root" in capsys.readouterr().err
+
+
+def _toml(tmp_path) -> Path:
+    return tmp_path / "pkg.toml"
+
+
+def test_add_packages_creates_block(tmp_path):
+    cfg.add_packages(_toml(write_root(tmp_path, "[config]\n")), ["fd", "zsh"])
+    text = _toml(tmp_path).read_text()
+    assert 'name = "base"' in text
+    assert 'packages = ["fd", "zsh"]' in text
+
+
+def test_add_packages_edits_existing(tmp_path):
+    d = write_root(tmp_path, '[[system]]\nname = "base"\npackages = ["zsh"]\n')
+    before, after = cfg.add_packages(_toml(d), ["fd"])
+    assert (before, after) == (["zsh"], ["fd", "zsh"])
+    assert 'name = "base"' in _toml(d).read_text()
+
+
+def test_add_packages_multiline_array(tmp_path):
+    text = """
+    [[system]]
+    name = "base"
+    packages = [
+        "zsh",
+        "fd",
+    ]
+    [hooks]
+    post = ["echo hi"]
+    """
+    d = write_root(tmp_path, text)
+    before, after = cfg.add_packages(_toml(d), ["rg"])
+    assert (before, after) == (["zsh", "fd"], ["fd", "rg", "zsh"])
+    content = _toml(d).read_text()
+    assert 'packages = ["fd", "rg", "zsh"]' in content
+    assert "echo hi" in content
+
+
+def test_add_packages_keeps_os_filtered_untouched(tmp_path):
+    text = """
+    [[system]]
+    os = ["darwin"]
+    packages = ["brew-only"]
+
+    [[system]]
+    packages = ["zsh"]
+    """
+    d = write_root(tmp_path, text)
+    cfg.add_packages(_toml(d), ["fd"])
+    content = _toml(d).read_text()
+    assert "brew-only" in content
+    assert 'os = ["darwin"]' in content
+    assert 'packages = ["fd", "zsh"]' in content
+
+
+def test_add_packages_creates_unfiltered_when_only_os_blocks(tmp_path):
+    text = """
+    [[system]]
+    os = ["linux"]
+    packages = ["rg"]
+    """
+    d = write_root(tmp_path, text)
+    before, after = cfg.add_packages(_toml(d), ["fd"])
+    assert (before, after) == ([], ["fd"])
+    content = _toml(d).read_text()
+    assert content.count("[[system]]") == 2
+    assert 'packages = ["fd"]' in content
+
+
+def test_remove_packages_empties_list(tmp_path):
+    text = '[[system]]\nname = "base"\npackages = ["zsh", "fd"]\n'
+    d = write_root(tmp_path, text)
+    before, after = cfg.remove_packages(_toml(d), ["zsh"])
+    assert (before, after) == (["zsh", "fd"], ["fd"])
+    before, after = cfg.remove_packages(_toml(d), ["fd"])
+    assert (before, after) == (["fd"], [])
+    assert "packages = []" in _toml(d).read_text()
+
+
+def test_remove_from_os_matching_block(monkeypatch, tmp_path):
+    text = """
+    [[system]]
+    os = ["linux"]
+    packages = ["rg", "fd"]
+    """
+    d = write_root(tmp_path, text)
+    monkeypatch.setattr(cfg, "host_os", lambda: "linux")
+    before, after = cfg.remove_packages(_toml(d), ["rg"])
+    assert (before, after) == (["rg", "fd"], ["fd"])
+    assert 'packages = ["fd"]' in _toml(d).read_text()
+
+
+def test_remove_untouched_when_not_declared(monkeypatch, tmp_path):
+    text = '[[system]]\nname = "base"\npackages = ["zsh"]\n[config]\nmode = "pkg"\n'
+    d = write_root(tmp_path, text)
+    before, after = cfg.remove_packages(_toml(d), ["nope"])
+    assert (before, after) == ([], [])
+    assert _toml(d).read_text() == text
