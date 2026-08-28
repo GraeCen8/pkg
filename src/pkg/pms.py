@@ -21,6 +21,9 @@ class PackageManager:
     def install(self, packages: list[str]) -> int:
         raise NotImplementedError
 
+    def remove(self, packages: list[str]) -> int:
+        raise NotImplementedError
+
     def _quiet(self, *cmd: str) -> bool:
         return (
             subprocess.run(
@@ -78,6 +81,14 @@ class Apt(PackageManager):
             return 1
         return self._verify(still)
 
+    def remove(self, packages: list[str]) -> int:
+        present = [p for p in packages if self.check(p)]
+        if not present:
+            return 0
+        if self._run_silent(self._sudo(["apt-get", "remove", "-y", *present])) != 0:
+            return 1
+        return 1 if [p for p in present if self.check(p)] else 0
+
 
 class Pacman(PackageManager):
     name = "pacman"
@@ -93,6 +104,14 @@ class Pacman(PackageManager):
         if self._run_silent(self._sudo(["pacman", "-S", "--noconfirm", "--needed", *missing])) != 0:
             return 1
         return self._verify(missing)
+
+    def remove(self, packages: list[str]) -> int:
+        present = [p for p in packages if self.check(p)]
+        if not present:
+            return 0
+        if self._run_silent(self._sudo(["pacman", "-Rns", "--noconfirm", *present])) != 0:
+            return 1
+        return 1 if [p for p in present if self.check(p)] else 0
 
 
 class Dnf(PackageManager):
@@ -110,6 +129,14 @@ class Dnf(PackageManager):
             return 1
         return self._verify(missing)
 
+    def remove(self, packages: list[str]) -> int:
+        present = [p for p in packages if self.check(p)]
+        if not present:
+            return 0
+        if self._run_silent(self._sudo(["dnf", "remove", "-y", *present])) != 0:
+            return 1
+        return 1 if [p for p in present if self.check(p)] else 0
+
 
 class Zypper(PackageManager):
     name = "zypper"
@@ -126,6 +153,15 @@ class Zypper(PackageManager):
             return 1
         return self._verify(missing)
 
+    def remove(self, packages: list[str]) -> int:
+        present = [p for p in packages if self.check(p)]
+        if not present:
+            return 0
+        cmd = self._sudo(["zypper", "--non-interactive", "remove", "-y", *present])
+        if self._run_silent(cmd) != 0:
+            return 1
+        return 1 if [p for p in present if self.check(p)] else 0
+
 
 class Apk(PackageManager):
     name = "apk"
@@ -141,6 +177,14 @@ class Apk(PackageManager):
         if self._run_silent(self._sudo(["apk", "add", "--no-interactive", *missing])) != 0:
             return 1
         return self._verify(missing)
+
+    def remove(self, packages: list[str]) -> int:
+        present = [p for p in packages if self.check(p)]
+        if not present:
+            return 0
+        if self._run_silent(["apk", "del", "--no-interactive", *present]) != 0:
+            return 1
+        return 1 if [p for p in present if self.check(p)] else 0
 
 
 def _brew() -> str | None:
@@ -173,6 +217,14 @@ class Brew(PackageManager):
         if self._run_silent([self._brew, "install", *missing]) != 0:
             return 1
         return self._verify(missing)
+
+    def remove(self, packages: list[str]) -> int:
+        present = [p for p in packages if self.check(p)]
+        if not present:
+            return 0
+        if self._run_silent([self._brew, "uninstall", *present]) != 0:
+            return 1
+        return 1 if [p for p in present if self.check(p)] else 0
 
 
 _REGISTRY = (Pacman, Apt, Dnf, Zypper, Apk, Brew)
