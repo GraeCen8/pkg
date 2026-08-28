@@ -178,6 +178,14 @@ def _spinner_run(verb: str, names: list[str], call) -> int:
     return rc
 
 
+def _consent(force_yes: bool, prompt: str) -> bool:
+    if force_yes:
+        return True
+    if not sys.stdin.isatty():
+        return False
+    return input(f"  {prompt}").strip().lower() in ("y", "yes")
+
+
 def _system_install(manager: pms_mod.PackageManager, missing: list[str]) -> int:
     rc = _spinner_run("installing", missing, lambda: manager.install(missing))
     if rc:
@@ -246,14 +254,11 @@ def cmd_sync(args: argparse.Namespace) -> int:
         print(out.section("== system =="))
         missing = manager.check_many(cfg.all_packages(root_dir))
         if missing:
-            if args.yes:
+            if _consent(args.yes, f"install these package(s)? {out.cyan('[y/N] ')}"):
                 rc = _system_install(manager, missing)
             elif sys.stdin.isatty():
-                answer = input(f"  install these packages? {out.cyan('[y/N] ')}")
-                if answer.lower() not in ("y", "yes"):
-                    print(out.red("  aborted"))
-                    return 1
-                rc = _system_install(manager, missing)
+                print(out.red("  aborted"))
+                return 1
             else:
                 rc = 1
                 print(err.red("[system] packages missing: rerun with --yes"))
@@ -290,12 +295,19 @@ def cmd_sync(args: argparse.Namespace) -> int:
     declared = cfg.all_packages(root_dir)
     previously = linker.load_installed()
     dropped = [pkg for pkg in previously if pkg not in declared]
-    linker.record_installed(declared)
     if dropped:
         print(out.section("== dropped =="))
-        print(out.yellow("  previously declared, now removed from manifest (never auto-removed):"))
+        print(out.yellow("  previously declared, now removed from manifest:"))
         for pkg in dropped:
             print(f"  {out.red('?')} {pkg}")
+        if _consent(args.yes, f"uninstall these {len(dropped)} package(s)? {out.cyan('[y/N] ')}"):
+            if _system_remove(manager, dropped):
+                return 1
+            linker.record_installed(declared)
+        elif sys.stdin.isatty():
+            print(out.dim("  keeping them installed (no longer tracked)"))
+    else:
+        linker.record_installed(declared)
 
     hooks = [(root, hook) for root in roots for hook in root.post_hooks]
     if hooks:

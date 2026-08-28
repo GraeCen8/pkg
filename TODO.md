@@ -25,7 +25,8 @@ Backlog and roadmap for `pkg`. Roughly priority-ordered; checked items are done.
 - [ ] Secrets — age-encrypted dotfiles, decrypted only at apply time.
 - [ ] More PM fronts — AUR helpers (yay/paru), flatpak, brew casks.
 - [ ] Glob / exclude support inside configs (ignore files within stow payload).
-- [ ] `pkg sync --prune` review step made interactive/non-interactive aware.
+- [x] `pkg sync --prune` review step made interactive/non-interactive aware
+      (dropped packages: tty prompt to uninstall `[y/N]`, script-safe listing).
 
 ## Explicit non-goals (v0)
 

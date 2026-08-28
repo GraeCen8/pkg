@@ -112,8 +112,11 @@ Configs you delete from a root become orphaned links on disk. `sync --prune`
 (and `plan --prune` to preview) removes orphans — but only ones `pkg` owns: the
 target must still match what pkg created (a hand-edited or re-pointed file is
 left alone with a notice). Packages that you remove from `[[system]]` are never
-uninstalled; instead, at the end of a successful sync, pkg lists any packages
-it previously saw and now no longer declares.
+automatically uninstalled; at the end of a sync, pkg lists any packages it
+previously saw and now no longer declares, and — when the terminal is
+interactive — asks whether to uninstall them (`[y/N]`). Saying no (or running
+non-interactively) never removes anything and leaves the decision pending, so
+the review comes back next sync. `-y/--yes` counts as consent.
 
 ## Modules
 
