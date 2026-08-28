@@ -24,30 +24,40 @@ mode = "pkg"
 
 # [hooks]
 # post = []
+
+# [git]
+# url = "git@github.com:you/dots.git"
 """
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pkg",
-        description="Declarative wraparound: system packages + symlinks",
+        description="pkg tool which can do more: system packages & symlinks",
     )
     parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub = parser.add_subparsers(dest="cmd")
 
     p = sub.add_parser("plan", help="show what would change, no side effects")
     p.add_argument("--system-only", action="store_true")
     p.add_argument("--configs-only", action="store_true")
+    p.add_argument("--prune", action="store_true", help="show orphaned links --prune would remove")
 
     s = sub.add_parser("sync", help="sync the machine to the manifest")
     s.add_argument("-y", "--yes", action="store_true")
     s.add_argument("--system-only", action="store_true")
     s.add_argument("--configs-only", action="store_true")
     s.add_argument("--force", action="store_true")
+    s.add_argument(
+        "--no-git",
+        action="store_true",
+        help="skip git pulls for roots that declare [git] url",
+    )
+    s.add_argument("--prune", action="store_true", help="remove orphaned links / rendered files")
 
     sub.add_parser("status", help="show package and link state")
     sub.add_parser("unlink", help="remove only symlinks pkg created")
@@ -86,6 +96,22 @@ def host() -> Path:
     return Path.home()
 
 
+def pull_roots(root_dir: Path, root_filter: list[cfg.Root] | None = None) -> None:
+    for root in root_filter or cfg.roots_in_order(root_dir):
+        if not root.git_url:
+            continue
+        if not (root.dir / ".git").exists():
+            sys.exit(f"{root.dir}: declares [git] url but is not a git checkout")
+        print(f"[git] pull: {root.dir}")
+        if (
+            subprocess.run(
+                ["git", "-C", str(root.dir), "pull", "--ff-only"], check=False
+            ).returncode
+            != 0
+        ):
+            sys.exit(f"[git] pull failed for {root.dir}")
+
+
 def print_links(items: list[linker.LinkItem]) -> None:
     for item in items:
         marker = {"ok": "=", "new": "+", "conflict": "!", "broken": "?"}[linker.item_status(item)]
@@ -97,6 +123,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
     home = host()
     manager = get_manager(root_dir)
     print(f"manager: {manager.label}")
+    if any(root.git_url for root in cfg.roots_in_order(root_dir)):
+        print("== git ==")
+        for root in cfg.roots_in_order(root_dir):
+            if root.git_url:
+                print(f"  ~ pull {root.dir} ({root.git_url})")
     print("== system ==")
     problems: list[str] = []
     if not args.configs_only:
@@ -107,6 +138,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
     print("== links ==")
     items = linker.plan(root_dir, home)
     print_links(items)
+    if args.prune:
+        for target in linker.orphaned(items):
+            print(f"  - {target} (pruned on `sync --prune`)")
     problems.extend(linker.find_conflicts(items, home))
     for problem in problems:
         print(f"  ! {problem}", file=sys.stderr)
@@ -117,6 +151,10 @@ def cmd_sync(args: argparse.Namespace) -> int:
     root_dir = find_root(args.root)
     home = host()
     manager = get_manager(root_dir)
+    roots = cfg.roots_in_order(root_dir)
+
+    if not args.no_git:
+        pull_roots(root_dir, roots)
 
     if not args.configs_only:
         missing = manager.check_many(cfg.all_packages(root_dir))
@@ -155,8 +193,21 @@ def cmd_sync(args: argparse.Namespace) -> int:
             print("[links] all targets already linked")
         if problems:
             print(f"[links] replaced {len(problems)} existing target(s)")
+        if args.prune:
+            removed, notices = linker.prune(items, home)
+            for notice in notices:
+                print(f"  ~ {notice}")
+            print(f"[prune] removed {removed} orphan(s)")
 
-    roots = cfg.roots_in_order(root_dir)
+    declared = cfg.all_packages(root_dir)
+    previously = linker.load_installed()
+    dropped = [pkg for pkg in previously if pkg not in declared]
+    linker.record_installed(declared)
+    if dropped:
+        print("[prune] previously declared, now removed from manifest (never auto-removed):")
+        for pkg in dropped:
+            print(f"  ? {pkg}")
+
     for root in roots:
         for hook in root.post_hooks:
             print(f"[hook] {hook}")
@@ -171,6 +222,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     home = host()
     manager = get_manager(root_dir)
     print(f"manager: {manager.label}")
+    for root in cfg.roots_in_order(root_dir):
+        if root.git_url:
+            print(f"git: {root.dir}: {root.git_url}")
     print("== system ==")
     for pkg in cfg.all_packages(root_dir):
         state = "installed" if manager.check(pkg) else "missing"
@@ -215,7 +269,11 @@ _COMMANDS = {
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not args.cmd:
+        parser.print_help()
+        return 0
     try:
         return _COMMANDS[args.cmd](args)
     except cfg.ConfigError as exc:

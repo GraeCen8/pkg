@@ -6,10 +6,11 @@ and **symlinks**. Write a root `pkg.toml`, drop configs into `configs/`, run
 
 **Sync is one-directional:** it installs missing packages, creates missing
 symlinks, and fixes drifted ones so the machine matches the manifest. It never
-removes anything on its own.
+removes anything on its own. `pkg sync --prune` additionally removes orphaned
+links for configs dropped from the manifest; removed **packages** are only ever
+listed for review, never uninstalled.
 
-> **Non-goals (v0):** no building from source, no content store, no templating,
-> no secrets, no pruning of removed packages.
+> **Non-goals (v0):** no building from source, no content store, no secrets.
 
 ## Layout
 
@@ -29,6 +30,9 @@ default home for it.
 ## `pkg.toml`
 
 ```toml
+[git]
+url = "git@github.com:you/dots.git"   # optional; sync runs `git pull --ff-only`
+
 [manager]
 name = "apt"                # optional; auto-detect otherwise (top root only)
 
@@ -38,6 +42,9 @@ on = ["nvim", "kitty"]      # top-level dirs to treat as embedded roots
 [config]
 stow = ["zsh"]              # these configs use stow mode
 mode = "pkg"                # "pkg" (default) | "stow" — process, then stow
+
+[config.vars]
+editor = "nvim"             # template variables, in addition to builtins
 ```
 
 plus optional per-root tables:
@@ -69,6 +76,45 @@ Every dir in `configs/` is auto-managed — **zero per-config entries required**
 
 A stray top-level *file* directly inside `configs/` is ignored with a warning.
 
+## Templating
+
+Files ending in `.tmpl` inside a **stow-mode** config are rendered into `$HOME`
+with `string.Template` (`$var` syntax, `$$` for a literal `$`):
+
+```
+configs/zsh/.zshrc.tmpl  →  ~/.zshrc        (rendered, not symlinked)
+```
+
+Available variables are the builtins `host`, `os`, and `home`, merged with any
+`[config.vars]` from the same root. A template referencing an unknown variable
+is a hard error. Rendered files are tracked by sha256 in the state file: pkg
+rewrites them when the template or vars change, refuses to overwrite them once
+you've hand-edited them (unless `--force`), and a rendered target that is a
+symlink is always a conflict. `.tmpl` files under a **pkg-mode** config are
+ignored with a warning — templating needs stow mode.
+
+## Git-backed roots
+
+A root (or module) with `[git] url` is auto-pulled before every `sync`:
+
+```
+[git]
+url = "git@github.com:you/dots.git"
+```
+
+`pkg sync --no-git` skips pulls; `plan`/`status` show the configured URL.
+A root that declares a URL but isn't a git checkout, or a pull that fails, is a
+hard error.
+
+## Pruning
+
+Configs you delete from a root become orphaned links on disk. `sync --prune`
+(and `plan --prune` to preview) removes orphans — but only ones `pkg` owns: the
+target must still match what pkg created (a hand-edited or re-pointed file is
+left alone with a notice). Packages that you remove from `[[system]]` are never
+uninstalled; instead, at the end of a successful sync, pkg lists any packages
+it previously saw and now no longer declares.
+
 ## Modules
 
 `[modules] on` enables top-level dirs as embedded roots. Each module has its own
@@ -84,9 +130,11 @@ across the whole tree.
 
 ```
 pkg plan       # diff of both stages, no side effects
+               #   --prune also lists orphans that `sync --prune` would remove
 pkg sync       # sync the machine to the manifest: ─ install pkgs (prompt
-               #   unless -y) ─ symlink ─ hooks
-               #   --system-only | --configs-only | --force | --yes
+               #   unless -y) ─ pull git roots (unless --no-git) ─ symlink
+               #   ─ prune orphans (--prune) ─ hooks
+               #   --system-only | --configs-only | --force | --yes | --prune | --no-git
 pkg status     # pkg installed/missing; links ok/drifted
 pkg unlink     # remove only symlinks pkg created (state file)
 pkg init       # scaffolds the root: pkg.toml + configs/
@@ -99,20 +147,31 @@ pkg init       # scaffolds the root: pkg.toml + configs/
   `[manager] name` in the top root.
 - **Apt special-case:** lazy `apt-get update` — only runs when a declared
   package isn't already known to dpkg.
-- Order is always: check → install (live confirm) → symlink → hooks. Hooks only
-  run after a fully successful sync.
+- Order is always: git pull → check → install (live confirm) → symlink →
+  hooks. Hooks only run after a fully successful sync.
 - **Conflicts abort.** If a target already exists (real file, dir, or symlink
   to elsewhere), `plan` shows it and `sync` fails without doing anything;
-  `--force` replaces it. Two configs mapping to the same target is also a
-  conflict — nothing is "last wins".
+  `--force` replaces it (non-empty directories are still refused and a backup
+  of anything replaced is kept under the state dir). Two configs mapping to the
+  same target is also a conflict — nothing is "last wins".
 - Everything is **idempotent**: already-installed packages and already-correct
   symlinks are no-ops.
-- State lives in `~/.local/state/pkg/links.json` — only symlinks `pkg` created,
-  so `unlink`/`status` never touch orphan targets. Safety relies on never
-  overwriting without `--force`, so a mid-run failure only leaves orphan
-  symlinks from that run, which are cleaned up before exiting nonzero.
+- State lives in `~/.local/state/pkg/links.json` — only symlinks/rendered files
+  `pkg` created, so `unlink`/`status`/`--prune` never touch targets it doesn't
+  own. Safety relies on never overwriting without `--force`, so a mid-run
+  failure only leaves orphan symlinks from that run, which are cleaned up
+  before exiting nonzero.
 
 ## Development
+
+```sh
+just install      # venv + editable install + dev deps
+just build        # self-contained ./pkg executable (zipapp, no deps)
+just test         # pytest
+just lint         # ruff
+```
+
+Or manually:
 
 ```sh
 python -m venv .venv
@@ -124,8 +183,5 @@ ruff check
 
 ## Deferred to v0.x
 
-- Templating / per-host variables
 - Secret encryption
-- Git-backed roots (`pkg sync` auto-pull)
-- Pruning removed packages
 - AUR / flatpak / homebrew-cask

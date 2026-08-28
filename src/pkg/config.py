@@ -38,7 +38,9 @@ class Root:
     mode: str
     systems: list[SystemEntry]
     post_hooks: list[str]
-    top: bool
+    git_url: str | None = None
+    template_vars: dict = field(default_factory=dict)
+    top: bool = True
 
     @classmethod
     def load(cls, root_dir: Path, top: bool = True) -> Root:
@@ -48,12 +50,13 @@ class Root:
         with open(pkg_toml, "rb") as fh:
             data = tomllib.load(fh)
         manager = (data.get("manager") or {}).get("name") or None
-        modules = [m for m in (data.get("modules") or {}).get("on", [])]
+        modules = list((data.get("modules") or {}).get("on", []))
         cfg = data.get("config") or {}
         stow = [s for s in cfg.get("stow", [])]
         mode = cfg.get("mode", "pkg")
         if mode not in ("pkg", "stow"):
             raise ConfigError(f"{pkg_toml}: config.mode must be 'pkg' or 'stow', got {mode!r}")
+        template_vars = dict(cfg.get("vars", {}))
         systems = [
             SystemEntry(
                 name=e.get("name", "default"),
@@ -63,6 +66,7 @@ class Root:
             for e in data.get("system", [])
         ]
         hooks = [h for h in (data.get("hooks") or {}).get("post", [])]
+        git_url = (data.get("git") or {}).get("url") or None
         return cls(
             dir=root_dir.resolve(),
             manager=manager,
@@ -71,6 +75,8 @@ class Root:
             mode=mode,
             systems=systems,
             post_hooks=hooks,
+            git_url=git_url,
+            template_vars=template_vars,
             top=top,
         )
 

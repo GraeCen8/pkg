@@ -93,6 +93,19 @@ def test_enabled_missing_module_errors(tmp_path):
         cfg.roots_in_order(d)
 
 
+def test_git_url_and_vars(tmp_path):
+    text = """
+    [git]
+    url = "https://example.com/dots.git"
+
+    [config]
+    vars = { editor = "nvim" }
+    """
+    root = cfg.Root.load(write_root(tmp_path, text))
+    assert root.git_url == "https://example.com/dots.git"
+    assert root.template_vars == {"editor": "nvim"}
+
+
 def test_top_only_manager_warns(tmp_path, capsys):
     modules = {"m": '[manager]\nname = "pacman"\n'}
     d = write_root(tmp_path, '[modules]\non = ["m"]\n', modules)
