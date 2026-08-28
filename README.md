@@ -136,10 +136,19 @@ pkg sync       # sync the machine to the manifest: ─ install pkgs (prompt
                #   ─ prune orphans (--prune) ─ hooks
                #   --system-only | --configs-only | --force | --yes | --prune | --no-git
 pkg status     # pkg installed/missing; links ok/drifted
+pkg add pkgs   # install pkgs and declare them in the manifest
+pkg remove pkgs# uninstall pkgs and undeclare them in the manifest
 pkg unlink     # remove only symlinks pkg created (state file)
 pkg init <dir> # scaffold a root at <dir>: pkg.toml + configs/
                #   (e.g. `pkg init ~/dots` or `pkg init .`)
 ```
+
+`pkg add`/`pkg remove` keep the manifest and the machine in step: `pkg add zsh`
+installs `zsh` (via the normal package-manager path) and appends it to the
+unfiltered `[[system]]` block, so the next `pkg sync` on any machine installs it
+too. `pkg remove zsh` uninstalls it and drops it from the manifest. Editing is
+text-preserving: comments, other tables, and os-filtered `[[system]]` blocks are
+left alone.
 
 `-R/--root <dir>` overrides the root. The last root you point at (via `-R` or
 `pkg init`) is remembered, so plain `pkg sync` works from anywhere — you only

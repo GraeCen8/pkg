@@ -73,6 +73,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="show package and link state")
     sub.add_parser("unlink", help="remove only symlinks pkg created")
 
+    a = sub.add_parser("add", help="install packages and declare them in the manifest")
+    a.add_argument("packages", nargs="+", metavar="NAME", help="package(s) to install + declare")
+
+    r = sub.add_parser("remove", help="uninstall packages and undeclare them in the manifest")
+    r.add_argument(
+        "packages", nargs="+", metavar="NAME", help="package(s) to uninstall + undeclare"
+    )
+
     i = sub.add_parser("init", help="scaffold a root at <dir>: pkg.toml + configs/")
     i.add_argument("target", help="dir to scaffold, e.g. ~/dots or .")
     i.add_argument("--force", action="store_true")
@@ -157,16 +165,21 @@ def _spinner(message: str) -> threading.Event:
     return stop
 
 
-def _system_install(manager: pms_mod.PackageManager, missing: list[str], yes: bool) -> int:
-    label = ", ".join(missing)
+def _spinner_run(verb: str, names: list[str], call) -> int:
+    label = ", ".join(names)
     use_spinner = colors.enabled(sys.stdout)
     if use_spinner:
-        stop = _spinner(f"installing {label}")
+        stop = _spinner(f"{verb} {label}")
     else:
-        print(f"  installing {label} ...")
-    rc = manager.install(missing)
+        print(f"  {verb} {label} ...")
+    rc = call()
     if use_spinner:
         stop.set()
+    return rc
+
+
+def _system_install(manager: pms_mod.PackageManager, missing: list[str]) -> int:
+    rc = _spinner_run("installing", missing, lambda: manager.install(missing))
     if rc:
         still = manager.check_many(missing)
         if still:
@@ -175,6 +188,19 @@ def _system_install(manager: pms_mod.PackageManager, missing: list[str], yes: bo
             print(out.red("  error: install failed"))
         return rc
     print(f"  {out.green('ok')} — installed {len(missing)} package(s)")
+    return 0
+
+
+def _system_remove(manager: pms_mod.PackageManager, packages: list[str]) -> int:
+    rc = _spinner_run("removing", packages, lambda: manager.remove(packages))
+    if rc:
+        still = [p for p in packages if manager.check(p)]
+        if still:
+            print(f"  {out.red('error')}: could not remove: {', '.join(still)}")
+        else:
+            print(out.red("  error: removal failed"))
+        return rc
+    print(f"  {out.green('ok')} — removed {len(packages)} package(s)")
     return 0
 
 
@@ -221,13 +247,13 @@ def cmd_sync(args: argparse.Namespace) -> int:
         missing = manager.check_many(cfg.all_packages(root_dir))
         if missing:
             if args.yes:
-                rc = _system_install(manager, missing, yes=True)
+                rc = _system_install(manager, missing)
             elif sys.stdin.isatty():
                 answer = input(f"  install these packages? {out.cyan('[y/N] ')}")
                 if answer.lower() not in ("y", "yes"):
                     print(out.red("  aborted"))
                     return 1
-                rc = _system_install(manager, missing, yes=True)
+                rc = _system_install(manager, missing)
             else:
                 rc = 1
                 print(err.red("[system] packages missing: rerun with --yes"))
@@ -329,12 +355,61 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_add(args: argparse.Namespace) -> int:
+    root_dir = find_root(args.root)
+    manager = get_manager(root_dir)
+    pkg_toml = root_dir / "pkg.toml"
+
+    before, after = cfg.add_packages(pkg_toml, args.packages)
+    added = [p for p in args.packages if p in after and p not in before]
+    for pkg in added:
+        print(f"  {out.cyan('+')} {pkg} (declared in manifest)")
+
+    missing = manager.check_many(args.packages)
+    present = [p for p in args.packages if p not in missing]
+    for pkg in present:
+        print(f"  {out.green('=')} {pkg} (already installed)")
+    if missing:
+        rc = _system_install(manager, missing)
+        if rc:
+            return 1
+
+    if root_dir.is_dir() and (root_dir / ".git").exists():
+        print(out.yellow("  hint: pkg.toml changed — commit it in the dots repo"))
+    print(f"  {out.green(out.bold('in sync'))}")
+    return 0
+
+
+def cmd_remove(args: argparse.Namespace) -> int:
+    root_dir = find_root(args.root)
+    manager = get_manager(root_dir)
+    pkg_toml = root_dir / "pkg.toml"
+
+    present = [p for p in args.packages if manager.check(p)]
+    if present:
+        rc = _system_remove(manager, present)
+        if rc:
+            return 1
+
+    before, after = cfg.remove_packages(pkg_toml, args.packages)
+    removed = [p for p in args.packages if p in before and p not in after]
+    for pkg in removed:
+        print(f"  {out.red('-')} {pkg} (removed from manifest)")
+
+    if root_dir.is_dir() and (root_dir / ".git").exists():
+        print(out.yellow("  hint: pkg.toml changed — commit it in the dots repo"))
+    print(f"  {out.green(out.bold('in sync'))}")
+    return 0
+
+
 _CMD = {
     "plan": cmd_plan,
     "sync": cmd_sync,
     "status": cmd_status,
     "unlink": cmd_unlink,
     "init": cmd_init,
+    "add": cmd_add,
+    "remove": cmd_remove,
 }
 
 
