@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import socket
 import string
 import time
@@ -114,6 +115,62 @@ def remembered_root() -> Path | None:
     return Path(value) if value else None
 
 
+def _compile_glob(pattern: str) -> re.Pattern:
+    out: list[str] = []
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "*":
+            if pattern[i : i + 2] == "**":
+                if i + 2 < n and pattern[i + 2] == "/":
+                    out.append("(?:[^/]+/)*")
+                    i += 3
+                    continue
+                out.append(".*")
+                i += 2
+                continue
+            out.append("[^/]*")
+            i += 1
+        elif c == "?":
+            out.append("[^/]")
+            i += 1
+        elif c == "[":
+            j = i + 1
+            if j < n and pattern[j] in "!^":
+                j += 1
+            if j < n:
+                k = j
+                while k < n and pattern[k] != "]":
+                    k += 1
+                if k < n:
+                    inner = pattern[j:k]
+                    if inner.startswith(("!", "^")):
+                        inner = "^" + inner[1:]
+                    out.append("[" + inner + "]")
+                    i = k + 1
+                    continue
+            out.append(re.escape(c))
+            i += 1
+        else:
+            out.append(re.escape(c))
+            i += 1
+    return re.compile("^" + "".join(out) + "$")
+
+
+def _is_ignored(rel: Path, patterns: list[str]) -> bool:
+    parts = list(rel.parts)
+    full = "/".join(parts)
+    for raw in patterns:
+        is_dir = raw.endswith("/")
+        pat = raw.rstrip("/")
+        rx = _compile_glob(pat)
+        if rx.match(full) or any(rx.match(p) for p in parts):
+            return True
+        if is_dir and (full == pat or full.startswith(pat + "/")):
+            return True
+    return False
+
+
 def _scan_stow(src: Path, out: list[Path]) -> None:
     for child in sorted(src.iterdir()):
         if child.is_dir() and not child.is_symlink():
@@ -145,6 +202,7 @@ def _plan_one(
     home: Path,
     items: list[LinkItem],
     variables: dict,
+    ignore: list[str],
 ) -> None:
     if mode == "pkg":
         payload: list[Path] = []
@@ -160,6 +218,8 @@ def _plan_one(
     _scan_stow(cdir, files)
     for source in files:
         rel = source.relative_to(cdir)
+        if _is_ignored(rel, ignore):
+            continue
         if rel.name.endswith(".tmpl"):
             content = _render_template(source, variables)
             target = home / rel.parent / rel.name[: -len(".tmpl")]
@@ -182,9 +242,11 @@ def plan(root_dir: Path, home: Path) -> list[LinkItem]:
         for child in sorted(cfgdir.iterdir()):
             if child.name.startswith("."):
                 continue
+            if _is_ignored(Path(child.name), root.ignore):
+                continue
             if child.is_dir():
                 mode = "stow" if child.name in root.stow else root.mode
-                _plan_one(child, mode, home, items, variables)
+                _plan_one(child, mode, home, items, variables, root.ignore)
             else:
                 print(f"{cfgdir}: warning: stray file ignored: {child.name}")
     items.sort(key=lambda it: str(it.target))
