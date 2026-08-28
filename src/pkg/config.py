@@ -23,11 +23,14 @@ class SystemEntry:
     name: str
     packages: list[str]
     os: list[str] = field(default_factory=list)
+    profiles: list[str] = field(default_factory=list)
 
-    def applies(self) -> bool:
-        if not self.os:
-            return True
-        return host_os() in {o.lower() for o in self.os}
+    def applies(self, active_profiles: list[str] | None = None) -> bool:
+        if self.os and host_os() not in {o.lower() for o in self.os}:
+            return False
+        return not (
+            self.profiles and not (set(active_profiles or []) & set(self.profiles))
+        )
 
 
 @dataclass
@@ -41,6 +44,9 @@ class Root:
     post_hooks: list[str]
     git_url: str | None = None
     template_vars: dict = field(default_factory=dict)
+    profiles: list[str] = field(default_factory=list)
+    ignore: list[str] = field(default_factory=list)
+    git_autocommit: bool = False
     top: bool = True
 
     @classmethod
@@ -63,11 +69,14 @@ class Root:
                 name=e.get("name", "default"),
                 packages=[p for p in e.get("packages", [])],
                 os=[o for o in e.get("os", [])],
+                profiles=[p for p in e.get("profiles", [])],
             )
             for e in data.get("system", [])
         ]
         hooks = [h for h in (data.get("hooks") or {}).get("post", [])]
-        git_url = (data.get("git") or {}).get("url") or None
+        git = data.get("git") or {}
+        git_url = git.get("url") or None
+        git_autocommit = bool(git.get("autocommit"))
         return cls(
             dir=root_dir.resolve(),
             manager=manager,
@@ -78,6 +87,9 @@ class Root:
             post_hooks=hooks,
             git_url=git_url,
             template_vars=template_vars,
+            profiles=list(cfg.get("profiles", [])),
+            ignore=list(cfg.get("ignore", [])),
+            git_autocommit=git_autocommit,
             top=top,
         )
 
@@ -104,10 +116,11 @@ def roots_in_order(root_dir: Path) -> list[Root]:
 
 
 def all_packages(root_dir: Path) -> list[str]:
+    active = Root.load(root_dir, top=True).profiles
     packages: list[str] = []
     for root in roots_in_order(root_dir):
         for entry in root.systems:
-            if entry.applies():
+            if entry.applies(active):
                 for pkg in entry.packages:
                     if pkg not in packages:
                         packages.append(pkg)
@@ -127,7 +140,7 @@ def _unfiltered_block_index(data: dict) -> int | None:
     if not isinstance(blocks, list):
         return None
     for i, block in enumerate(blocks):
-        if isinstance(block, dict) and "os" not in block:
+        if isinstance(block, dict) and "os" not in block and "profiles" not in block:
             return i
     return None
 
@@ -137,7 +150,13 @@ def _os_matches(values: list[str]) -> bool:
     return any(h == v.lower() for v in values)
 
 
-def _remove_block_index(data: dict, packages: list[str]) -> int | None:
+def _profiles_match(block_profiles: list[str], active: list[str]) -> bool:
+    if not block_profiles:
+        return True
+    return bool(set(active) & set(block_profiles))
+
+
+def _remove_block_index(data: dict, packages: list[str], active_profiles: list[str]) -> int | None:
     blocks = data.get("system")
     if not isinstance(blocks, list):
         return None
@@ -145,7 +164,9 @@ def _remove_block_index(data: dict, packages: list[str]) -> int | None:
         if not isinstance(block, dict):
             continue
         hits = any(p in block.get("packages", []) for p in packages)
-        if hits and (not block.get("os") or _os_matches(block["os"])):
+        os_ok = not block.get("os") or _os_matches(block["os"])
+        profiles_ok = _profiles_match(list(block.get("profiles", [])), active_profiles)
+        if hits and os_ok and profiles_ok:
             return i
     return None
 
@@ -157,7 +178,12 @@ def _edit_packages(pkg_toml: Path, packages: list[str], add: bool) -> tuple[list
     with open(pkg_toml, "rb") as fh:
         data = tomllib.load(fh)
 
-    idx = _unfiltered_block_index(data) if add else _remove_block_index(data, packages)
+    active_profiles = list((data.get("config") or {}).get("profiles", []))
+    idx = (
+        _unfiltered_block_index(data)
+        if add
+        else _remove_block_index(data, packages, active_profiles)
+    )
     current = [str(p) for p in data["system"][idx].get("packages", [])] if idx is not None else []
     if add:
         new = sorted(set(current) | set(packages))

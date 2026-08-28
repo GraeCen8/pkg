@@ -367,6 +367,27 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _autocommit(root_dir: Path, message: str) -> None:
+    rc = subprocess.run(["git", "-C", str(root_dir), "add", "pkg.toml"], check=False).returncode
+    if rc == 0:
+        rc = subprocess.run(
+            ["git", "-C", str(root_dir), "commit", "-m", message], check=False
+        ).returncode
+    if rc == 0:
+        print(f"  {out.green('committed')} pkg.toml (git)")
+    else:
+        print(out.yellow(f"  warning: git commit failed: {message}"))
+
+
+def _manifest_commit(root_dir: Path, changed: list[str], verb: str) -> None:
+    if not changed or not (root_dir / ".git").exists():
+        return
+    if cfg.Root.load(root_dir, top=True).git_autocommit:
+        _autocommit(root_dir, f"pkg: {verb} {', '.join(changed)}")
+    else:
+        print(out.yellow("  hint: pkg.toml changed — commit it in the dots repo"))
+
+
 def cmd_add(args: argparse.Namespace) -> int:
     root_dir = find_root(args.root)
     manager = get_manager(root_dir)
@@ -386,8 +407,7 @@ def cmd_add(args: argparse.Namespace) -> int:
         if rc:
             return 1
 
-    if root_dir.is_dir() and (root_dir / ".git").exists():
-        print(out.yellow("  hint: pkg.toml changed — commit it in the dots repo"))
+    _manifest_commit(root_dir, added, "add")
     print(f"  {out.green(out.bold('in sync'))}")
     return 0
 
@@ -408,8 +428,7 @@ def cmd_remove(args: argparse.Namespace) -> int:
     for pkg in removed:
         print(f"  {out.red('-')} {pkg} (removed from manifest)")
 
-    if root_dir.is_dir() and (root_dir / ".git").exists():
-        print(out.yellow("  hint: pkg.toml changed — commit it in the dots repo"))
+    _manifest_commit(root_dir, removed, "remove")
     print(f"  {out.green(out.bold('in sync'))}")
     return 0
 
