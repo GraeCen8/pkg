@@ -224,10 +224,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
                 print(f"  {out.cyan('~')} pull {out.dim(str(root.dir))} ({root.git_url})")
     print(out.section("== system =="))
     problems: list[str] = []
+    pkgs = cfg.all_packages(root_dir, manager.name)
     if not args.configs_only:
-        for pkg in manager.check_many(cfg.all_packages(root_dir)):
+        for pkg in manager.check_many(pkgs):
             print(f"  {out.green('+')} {pkg}")
-        if manager.check_many(cfg.all_packages(root_dir)):
+        if manager.check_many(pkgs):
             problems.append("packages to install")
     print(out.section("== links =="))
     items = linker.plan(root_dir, home)
@@ -252,7 +253,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
     if not args.configs_only:
         print(out.section("== system =="))
-        missing = manager.check_many(cfg.all_packages(root_dir))
+        pkgs = cfg.all_packages(root_dir, manager.name)
+        missing = manager.check_many(pkgs)
         if missing:
             if _consent(args.yes, f"install these package(s)? {out.cyan('[y/N] ')}"):
                 rc = _system_install(manager, missing)
@@ -292,7 +294,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
                 print(f"  {out.yellow('~')} {notice}")
             print(f"  {out.green(f'pruned {removed} orphan(s)')}")
 
-    declared = cfg.all_packages(root_dir)
+    declared = cfg.all_packages(root_dir, manager.name)
     previously = linker.load_installed()
     dropped = [pkg for pkg in previously if pkg not in declared]
     if dropped:
@@ -330,7 +332,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         if root.git_url:
             print(f"{out.cyan('git')}: {root.dir}: {root.git_url}")
     print(out.section("== system =="))
-    for pkg in cfg.all_packages(root_dir):
+    pkgs = cfg.all_packages(root_dir, manager.name)
+    for pkg in pkgs:
         state = "installed" if manager.check(pkg) else "missing"
         color = out.green if state == "installed" else out.red
         print(f"  {color(state):10} {pkg}")
@@ -398,8 +401,9 @@ def cmd_add(args: argparse.Namespace) -> int:
     for pkg in added:
         print(f"  {out.cyan('+')} {pkg} (declared in manifest)")
 
-    missing = manager.check_many(args.packages)
-    present = [p for p in args.packages if p not in missing]
+    pkgs = [cfg.resolve_package_name(p, manager.name, cfg.Root.load(root_dir).pkgs_map) for p in args.packages]
+    missing = manager.check_many(pkgs)
+    present = [p for p, mapped in zip(args.packages, pkgs) if mapped not in missing]
     for pkg in present:
         print(f"  {out.green('=')} {pkg} (already installed)")
     if missing:
@@ -417,9 +421,10 @@ def cmd_remove(args: argparse.Namespace) -> int:
     manager = get_manager(root_dir)
     pkg_toml = root_dir / "pkg.toml"
 
-    present = [p for p in args.packages if manager.check(p)]
+    pkgs = [cfg.resolve_package_name(p, manager.name, cfg.Root.load(root_dir).pkgs_map) for p in args.packages]
+    present = [p for p, mapped in zip(args.packages, pkgs) if manager.check(mapped)]
     if present:
-        rc = _system_remove(manager, present)
+        rc = _system_remove(manager, [cfg.resolve_package_name(p, manager.name, cfg.Root.load(root_dir).pkgs_map) for p in present])
         if rc:
             return 1
 

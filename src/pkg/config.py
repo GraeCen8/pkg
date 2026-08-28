@@ -48,6 +48,7 @@ class Root:
     ignore: list[str] = field(default_factory=list)
     git_autocommit: bool = False
     top: bool = True
+    pkgs_map: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, root_dir: Path, top: bool = True) -> Root:
@@ -77,6 +78,7 @@ class Root:
         git = data.get("git") or {}
         git_url = git.get("url") or None
         git_autocommit = bool(git.get("autocommit"))
+        pkgs_map = data.get("pkgs_map", {})
         return cls(
             dir=root_dir.resolve(),
             manager=manager,
@@ -91,6 +93,7 @@ class Root:
             ignore=list(cfg.get("ignore", [])),
             git_autocommit=git_autocommit,
             top=top,
+            pkgs_map=pkgs_map,
         )
 
 
@@ -115,15 +118,30 @@ def roots_in_order(root_dir: Path) -> list[Root]:
     return order
 
 
-def all_packages(root_dir: Path) -> list[str]:
+def resolve_package_name(pkg: str, manager: str, pkgs_map: dict) -> str:
+    if pkg in pkgs_map:
+        mapped = pkgs_map[pkg]
+        if isinstance(mapped, dict) and manager in mapped:
+            return mapped[manager]
+    return pkg
+
+def all_packages(root_dir: Path, manager: str | None = None) -> list[str]:
     active = Root.load(root_dir, top=True).profiles
+    roots = roots_in_order(root_dir)
+    # find package manager (string) if not given
+    if manager is None:
+        from pkg import pms as pms_mod
+        mgr = pms_mod.detect(Root.load(root_dir, top=True).manager)
+        manager = mgr.name
     packages: list[str] = []
-    for root in roots_in_order(root_dir):
+    for root in roots:
+        pkgs_map = root.pkgs_map if hasattr(root, 'pkgs_map') else {}
         for entry in root.systems:
             if entry.applies(active):
                 for pkg in entry.packages:
-                    if pkg not in packages:
-                        packages.append(pkg)
+                    mapped_pkg = resolve_package_name(pkg, manager, pkgs_map)
+                    if mapped_pkg not in packages:
+                        packages.append(mapped_pkg)
     return packages
 
 
