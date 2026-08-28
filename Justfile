@@ -31,5 +31,10 @@ lint:
     {{venv}}/bin/ruff format --check .
 
 # (Re)install the package + dev deps into the venv
-install:
+getdeps:
     {{venv}}/bin/pip install -e ".[dev]"
+
+# installs pkg onto the users system into /usr/bin/pkg
+install:
+    just build
+    sudo cp ./pkg /usr/bin/pkg
