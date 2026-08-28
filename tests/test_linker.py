@@ -258,3 +258,46 @@ def test_force_refuses_nonempty_dir(tmp_path):
     with pytest.raises(linker.ConflictError, match="non-empty"):
         linker.apply(linker.plan(root, home), home, force=True)
     assert (home / ".config" / "keep").read_text() == "mine"
+
+
+GV = [
+    ("x.swp", ["**/*.swp"], True),
+    ("a/b/x.swp", ["**/*.swp"], True),
+    ("x.txt", ["**/*.swp"], False),
+    (".DS_Store", [".DS_Store"], True),
+    ("a/b/.DS_Store", [".DS_Store"], True),
+    (".git/config", [".git"], True),
+    ("a/.git", [".git"], True),
+    (".git", [".git"], True),
+    ("docs/x", ["docs/"], True),
+    ("a/docs/x", ["docs/"], True),
+    ("a/b.txt", ["b.tx?"], True),
+    ("a/b.txt", ["[ab].txt"], True),
+    ("a/f.txt", ["[ab].txt"], False),
+    ("a", ["a"], True),
+]
+
+
+@pytest.mark.parametrize("rel,patterns,expected", GV)
+def test_is_ignored(rel, patterns, expected):
+    assert linker._is_ignored(Path(rel), patterns) is expected
+
+
+def test_ignore_filters_stow_payload(tmp_path, state_home):
+    root = make_root(
+        tmp_path,
+        '[config]\nstow = ["zsh"]\nignore = ["**/*.swp", ".DS_Store"]\n',
+        {"zsh": {".zshrc": "x", ".zshrc.swp": "y", "sub/.DS_Store": "z"}},
+    )
+    items = linker.plan(root, tmp_path / "home")
+    assert [str(i.target) for i in items] == [str(tmp_path / "home" / ".zshrc")]
+
+
+def test_ignore_skips_whole_config(tmp_path):
+    root = make_root(
+        tmp_path,
+        '[config]\nignore = ["cache"]\n',
+        {"cache": {"x": "1"}, "nvim": {"init.lua": "x"}},
+    )
+    items = linker.plan(root, tmp_path / "home")
+    assert [i.target.name for i in items] == ["nvim"]

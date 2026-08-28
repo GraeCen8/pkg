@@ -113,6 +113,85 @@ def test_top_only_manager_warns(tmp_path, capsys):
     assert "applies only at the top root" in capsys.readouterr().err
 
 
+def test_profiles_and_other_fields(tmp_path):
+    text = """
+    [config]
+    profiles = ["work"]
+    ignore = ["**/*.swp", ".git"]
+
+    [git]
+    autocommit = true
+    """
+    root = cfg.Root.load(write_root(tmp_path, text))
+    assert root.profiles == ["work"]
+    assert root.ignore == ["**/*.swp", ".git"]
+    assert root.git_autocommit is True
+
+
+def test_profile_blocks_filter_packages(monkeypatch, tmp_path):
+    text = """
+    [[system]]
+    profiles = ["work"]
+    packages = ["docker"]
+
+    [[system]]
+    packages = ["everywhere"]
+    """
+    d = write_root(tmp_path, '[config]\nprofiles = ["work"]\n' + text)
+    assert cfg.all_packages(d) == ["docker", "everywhere"]
+    d2 = write_root(tmp_path, "[config]\n" + text)
+    assert cfg.all_packages(d2) == ["everywhere"]
+
+
+def test_remove_from_profile_matching_block(monkeypatch, tmp_path):
+    text = """
+    [config]
+    profiles = ["work"]
+
+    [[system]]
+    profiles = ["work"]
+    packages = ["rg", "fd"]
+    """
+    d = write_root(tmp_path, text)
+    before, after = cfg.remove_packages(_toml(d), ["rg"])
+    assert (before, after) == (["rg", "fd"], ["fd"])
+    assert 'packages = ["fd"]' in _toml(d).read_text()
+
+
+def test_remove_ignores_other_profile_blocks(monkeypatch, tmp_path):
+    text = """
+    [config]
+    profiles = ["work"]
+
+    [[system]]
+    profiles = ["home"]
+    packages = ["xps-only"]
+
+    [[system]]
+    packages = ["zsh"]
+    """
+    d = write_root(tmp_path, text)
+    before, after = cfg.remove_packages(_toml(d), ["xps-only"])
+    assert (before, after) == ([], [])
+    assert "xps-only" in _toml(d).read_text()
+
+
+def test_add_skips_profile_blocks(tmp_path):
+    text = """
+    [[system]]
+    profiles = ["work"]
+    packages = ["docker"]
+
+    [[system]]
+    packages = ["zsh"]
+    """
+    d = write_root(tmp_path, text)
+    cfg.add_packages(_toml(d), ["fd"])
+    content = _toml(d).read_text()
+    assert 'name = "base"' not in content or 'packages = ["fd", "zsh"]' in content
+    assert 'packages = ["docker"]' in content
+
+
 def _toml(tmp_path) -> Path:
     return tmp_path / "pkg.toml"
 
