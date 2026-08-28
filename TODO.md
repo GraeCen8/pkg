@@ -16,7 +16,7 @@ Backlog and roadmap for `pkg`. Roughly priority-ordered; checked items are done.
       auto-removed.
 - [x] **Per-host templating** — `*.tmpl` files in stow-mode configs render via
       `$var` syntax (built-ins `host`, `os`, `home` + `[config] vars`).
-- [ ] Hardened PM tests — mocked `_run`/`_quiet` asserting command shapes for
+- [x] Hardened PM tests — mocked `_run`/`_quiet` asserting command shapes for
       all six backends (apt lazy-update path included).
 
 ## v0.x
