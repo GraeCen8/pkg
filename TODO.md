@@ -16,10 +16,16 @@ Backlog and roadmap for `pkg`. Roughly priority-ordered; checked items are done.
 
 ## v0.x
 
+- [x] Profiles — `[config] profiles` + `profiles = [...]` on `[[system]]`
+      blocks (role filtering, like `os`).
+- [x] Ignore globs — `[config] ignore = [...]` excludes files/configs from the
+      link plan.
+- [x] `[git] autocommit` — `pkg add`/`pkg remove` commit `pkg.toml` in git
+      roots.
 - [ ] `pkg new <name>` — scaffold a config or module dir.
 - [ ] Secrets — age-encrypted dotfiles, decrypted only at apply time.
 - [ ] More PM fronts — AUR helpers (yay/paru), flatpak, brew casks.
-- [ ] Glob / exclude support inside configs (ignore files within stow payload).
+- [x] Glob / exclude support inside configs (ignore files within stow payload).
 - [x] `pkg sync --prune` review step made interactive/non-interactive aware
       (dropped packages: tty prompt to uninstall `[y/N]`, script-safe listing).
 

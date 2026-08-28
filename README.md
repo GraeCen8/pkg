@@ -45,6 +45,10 @@ mode = "pkg"                # "pkg" (default) | "stow" — process, then stow
 
 [config.vars]
 editor = "nvim"             # template variables, in addition to builtins
+
+[config]                    # optional role filtering + file exclusions
+profiles = ["work"]         # active roles; overrides nothing by default
+ignore = ["**/*.swp", ".DS_Store"]   # glob patterns; optional
 ```
 
 plus optional per-root tables:
@@ -52,11 +56,42 @@ plus optional per-root tables:
 ```toml
 [[system]]                  # machine-wide packages; root or any module
 os = ["darwin"]
+profiles = ["work"]         # optional; only on machines with this role active
 packages = ["ripgrep"]
+
+[git]
+autocommit = true           # pkg add/remove commits pkg.toml in git roots
 
 [hooks]
 post = ["chsh -s $(which zsh)"]   # run after a fully successful sync
 ```
+
+**Profiles** select between `[[system]]` blocks the way `os` does, for when one
+dots repo spans machines with different roles:
+
+```toml
+[config]
+profiles = ["work"]         # this machine's roles
+
+[[system]]
+profiles = ["work"]         # block only applies where "work" is active
+packages = ["docker"]
+```
+
+A block with no `profiles` (and no `os`) always applies; so leaving the key
+out means today's behavior. `pkg add` always declares into the every-machine
+block.
+
+**Ignore globs** drop files out of the link plan:
+
+```toml
+[config]
+ignore = ["**/*.swp", ".DS_Store", "cache/"]
+```
+
+Patterns match the path inside a config dir (or the config's name itself);
+`**` crosses directories. Great for editor junk and whole subfolders you don't
+want mirrored.
 
 ## Config mapping
 
@@ -105,6 +140,11 @@ url = "git@github.com:you/dots.git"
 `pkg sync --no-git` skips pulls; `plan`/`status` show the configured URL.
 A root that declares a URL but isn't a git checkout, or a pull that fails, is a
 hard error.
+
+With `[git] autocommit = true`, `pkg add` and `pkg remove` commit the
+`pkg.toml` change themselves (`pkg: add zsh`) instead of just hinting — handy
+when the manifest lives in the dots repo. Without it they print the usual
+"commit it in the dots repo" hint.
 
 ## Pruning
 
