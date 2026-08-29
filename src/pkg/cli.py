@@ -232,6 +232,7 @@ def _system_remove(manager: pms_mod.PackageManager, packages: list[str]) -> int:
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
+    """``pkg plan`` — show what sync would do without making changes."""
     root_dir = find_root(args.root)
     home = host()
     manager = get_manager(root_dir)
@@ -262,6 +263,10 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
+    """``pkg sync`` — sync the machine to the manifest.
+
+    Runs: git pull → package install → symlink apply → hooks → dropped review.
+    """
     root_dir = find_root(args.root or args.directory)
     home = host()
     manager = get_manager(root_dir)
@@ -353,6 +358,7 @@ def _snapshot_mtime(root_dir: Path) -> float:
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
+    """``pkg watch`` — re-run sync when pkg.toml or configs/ changes."""
     root_dir = find_root(args.root or getattr(args, "directory", None))
     args.root = str(root_dir)
     args.yes = True
@@ -375,6 +381,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    """``pkg status`` — show current package install state and link status."""
     root_dir = find_root(args.root)
     home = host()
     manager = get_manager(root_dir)
@@ -399,6 +406,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_unlink(args: argparse.Namespace) -> int:
+    """``pkg unlink`` — remove all symlinks and rendered files pkg created."""
     removed = linker.unlink(host())
     verb = "symlink(s)" if removed == 1 else "symlinks"
     print(f"  {out.green(f'removed {removed} {verb}')}")
@@ -406,6 +414,7 @@ def cmd_unlink(args: argparse.Namespace) -> int:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    """``pkg init`` — scaffold a new root directory with ``pkg.toml`` and ``configs/``."""
     d = Path(args.target).expanduser().resolve()
     (d / "configs").mkdir(parents=True, exist_ok=True)
     pkg_toml = d / "pkg.toml"
