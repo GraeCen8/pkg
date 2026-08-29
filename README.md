@@ -171,63 +171,75 @@ across the whole tree.
 
 ## CLI
 
-### One-line install
+### Install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/graecen8/pkg/main/install.sh | bash
 ```
 
+### Commands
+
 ```
-pkg plan       # diff of both stages, no side effects
-               #   --prune also lists orphans that `sync --prune` would remove
-pkg sync       # sync the machine to the manifest: ─ install pkgs (prompt
-               #   unless -y) ─ pull git roots (unless --no-git) ─ symlink
-               #   ─ prune orphans (--prune) ─ hooks
-               #   --system-only | --configs-only | --force | --yes | --prune | --no-git
-pkg status     # pkg installed/missing; links ok/drifted
-pkg add pkgs   # install pkgs and declare them in the manifest
-pkg remove pkgs# uninstall pkgs and undeclare them in the manifest
-pkg unlink     # remove only symlinks pkg created (state file)
-pkg init <dir> # scaffold a root at <dir>: pkg.toml + configs/
-               #   (e.g. `pkg init ~/dots` or `pkg init .`)
+pkg plan                         # preview what sync would do, no side effects
+                                 #   --prune also shows orphans
+pkg sync [dir]                   # sync machine to manifest: install pkgs, pull
+                                 #   git roots, symlink configs, prune orphans,
+                                 #   run hooks. Pass a dir or use -R to override.
+                                 #   --system-only | --configs-only | --force
+                                 #   --yes | --prune | --no-git
+pkg watch [dir]                  # re-run sync when pkg.toml or configs/ changes
+                                 #   --interval N  (poll seconds, default 2)
+pkg status                       # show packages and link state
+pkg add <pkgs>                   # install + declare in manifest
+pkg remove <pkgs>                # uninstall + undeclare from manifest
+pkg unlink                       # remove only symlinks pkg created
+pkg init <dir>                   # scaffold a new root: pkg.toml + configs/
 ```
+
+### How sync works
+
+`pkg sync` runs in order: git pull → check → install → symlink → hooks.
+
+**Packages:** the system package manager is auto-detected from `/etc/os-release`
+(`apt`/`pacman`/`dnf`/`zypper`/`apk`), or `brew` on macOS. If `yay` or `paru`
+is installed, it is used instead of `pacman` so AUR packages are supported.
+Override with `[manager] name` in the top root. Each package is installed
+individually with a spinner; failures are reported per-package.
+
+**Configs:** each dir in `configs/` becomes a symlink under `~/.config/` (pkg
+mode) or individual files under `~` (stow mode). Conflicts abort unless
+`--force` is passed.
+
+**Dropped packages:** packages removed from `[[system]]` are listed for review
+at the end of sync. In interactive mode you're asked whether to uninstall them;
+in batch mode they're left alone.
+
+### Manifest editing
 
 `pkg add`/`pkg remove` keep the manifest and the machine in step: `pkg add zsh`
-installs `zsh` (via the normal package-manager path) and appends it to the
-unfiltered `[[system]]` block, so the next `pkg sync` on any machine installs it
-too. `pkg remove zsh` uninstalls it and drops it from the manifest. Editing is
-text-preserving: comments, other tables, and os-filtered `[[system]]` blocks are
-left alone.
+installs `zsh` and appends it to the unfiltered `[[system]]` block, so the next
+`pkg sync` on any machine installs it too. `pkg remove zsh` uninstalls it and
+drops it from the manifest. Editing is text-preserving: comments, other tables,
+and os-filtered `[[system]]` blocks are left alone.
 
 `-R/--root <dir>` overrides the root. The last root you point at (via `-R` or
-`pkg init`) is remembered, so plain `pkg sync` works from anywhere — you only
-ever type the root once.
+`pkg init`) is remembered, so plain `pkg sync` works from anywhere.
 
 ## Behavior rules
 
-- Output is colored when the terminal supports it (and `NO_COLOR` not set);
-  installs run quietly — you see `installing: pkg …` with a spinner, not the
-  package manager's own output — and only packages that genuinely couldn't be
-  installed are called out as "not found".
-- Package manager auto-detected from `/etc/os-release` (`ID` + `ID_LIKE`)
-  → apt/pacman/dnf/zypper/apk, or `brew` on macOS. Override with
-  `[manager] name` in the top root.
+- Output is colored when the terminal supports it (`NO_COLOR` respected).
+- Installs run per-package with a spinner — no package manager noise.
 - **Apt special-case:** lazy `apt-get update` — only runs when a declared
   package isn't already known to dpkg.
-- Order is always: git pull → check → install (live confirm) → symlink →
-  hooks. Hooks only run after a fully successful sync.
 - **Conflicts abort.** If a target already exists (real file, dir, or symlink
   to elsewhere), `plan` shows it and `sync` fails without doing anything;
-  `--force` replaces it (non-empty directories are still refused and a backup
-  of anything replaced is kept under the state dir). Two configs mapping to the
-  same target is also a conflict — nothing is "last wins".
+  `--force` replaces it (backups kept under the state dir). Two configs mapping
+  to the same target is also a conflict.
 - Everything is **idempotent**: already-installed packages and already-correct
   symlinks are no-ops.
 - State lives in `~/.local/state/pkg/links.json` — only symlinks/rendered files
   `pkg` created, so `unlink`/`status`/`--prune` never touch targets it doesn't
-  own. Safety relies on never overwriting without `--force`, so a mid-run
-  failure only leaves orphan symlinks from that run, which are cleaned up
-  before exiting nonzero.
+  own.
 
 ## Development
 
@@ -247,8 +259,3 @@ pip install -e ".[dev]"
 pytest
 ruff check
 ```
-
-## Deferred to v0.x
-
-- Secret encryption
-- AUR / flatpak / homebrew-cask
