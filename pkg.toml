@@ -12,4 +12,4 @@ mode = "pkg"
 # on = []
 
 [[system]]
-packages = ["ripgrep", "bat"]
+packages = ["bat", "ripgrep"]
