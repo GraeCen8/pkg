@@ -452,6 +452,7 @@ def _manifest_commit(root_dir: Path, changed: list[str], verb: str) -> None:
 
 
 def cmd_add(args: argparse.Namespace) -> int:
+    """``pkg add`` — install packages and declare them in the manifest."""
     root_dir = find_root(args.root)
     manager = get_manager(root_dir)
     pkg_toml = root_dir / "pkg.toml"
@@ -477,6 +478,7 @@ def cmd_add(args: argparse.Namespace) -> int:
 
 
 def cmd_remove(args: argparse.Namespace) -> int:
+    """``pkg remove`` — uninstall packages and remove them from the manifest."""
     root_dir = find_root(args.root)
     manager = get_manager(root_dir)
     pkg_toml = root_dir / "pkg.toml"
@@ -511,6 +513,7 @@ _CMD = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point for the ``pkg`` CLI.  Parses args and dispatches to the subcommand."""
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.cmd:
