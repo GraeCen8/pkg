@@ -6,8 +6,8 @@ import pytest
 from pkg import linker
 
 
-@pytest.fixture
-def state_home(tmp_path, monkeypatch):
+@pytest.fixture(autouse=True)
+def _state_home(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     return tmp_path / "state"
 
