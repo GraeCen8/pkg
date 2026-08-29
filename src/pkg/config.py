@@ -189,6 +189,33 @@ def _remove_block_index(data: dict, packages: list[str], active_profiles: list[s
     return None
 
 
+def _extract_array_comments(lines: list[str], start: int, end: int) -> list[str]:
+    """Extract comment lines from within a packages = [...] array range."""
+    comments = []
+    for i in range(start, end):
+        stripped = lines[i].strip()
+        if stripped.startswith("#"):
+            comments.append(stripped)
+    return comments
+
+
+def _format_packages_array(packages: list[str], comments: list[str] | None = None) -> str:
+    """Format a packages list as single-line or multi-line TOML array.
+
+    Uses multi-line format when there are more than 3 items.
+    Preserves comments from the original array.
+    """
+    if len(packages) <= 3:
+        return f"packages = {json.dumps(packages)}"
+
+    items = list(packages)
+    if comments:
+        items = items[:len(comments)] + comments + items[len(comments):]
+    indent = "    "
+    inner = "\n".join(f'{indent}"{p}",' for p in items)
+    return f"packages = [\n{inner}\n]"
+
+
 def _edit_packages(pkg_toml: Path, packages: list[str], add: bool) -> tuple[list[str], list[str]]:
     text = pkg_toml.read_text()
     had_newline = text.endswith("\n")
@@ -213,24 +240,26 @@ def _edit_packages(pkg_toml: Path, packages: list[str], add: bool) -> tuple[list
             return current, new
         if had_newline and lines and lines[-1] != "":
             lines.append("")
-        lines += ["[[system]]", 'name = "base"', f"packages = {json.dumps(new)}"]
+        lines += ["[[system]]", 'name = "base"', _format_packages_array(new)]
     else:
         start, end = _system_block_ranges(lines)[idx]
-        payload = json.dumps(new)
+        existing_comments = _extract_array_comments(lines, start, end)
+        payload = _format_packages_array(new, existing_comments)
         replaced = False
         for i in range(start, end):
             if lines[i].lstrip().startswith("packages"):
                 j = i
                 while "]" not in lines[j] and j + 1 < end:
                     j += 1
-                lines[i : j + 1] = [f"packages = {payload}"]
+                lines[i : j + 1] = payload.splitlines()
                 replaced = True
                 break
         if not replaced:
             last = end - 1
             while last > start and lines[last].strip() == "":
                 last -= 1
-            lines.insert(last + 1, f"packages = {payload}")
+            for k, line in enumerate(payload.splitlines()):
+                lines.insert(last + 1 + k, line)
 
     pkg_toml.write_text("\n".join(lines) + ("\n" if had_newline else ""))
     return current, new

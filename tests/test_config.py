@@ -289,3 +289,52 @@ def test_remove_untouched_when_not_declared(monkeypatch, tmp_path):
     before, after = cfg.remove_packages(_toml(d), ["nope"])
     assert (before, after) == ([], [])
     assert _toml(d).read_text() == text
+
+
+def test_add_packages_multiline_when_many(tmp_path):
+    text = '[[system]]\npackages = ["a", "b", "c"]\n'
+    d = write_root(tmp_path, text)
+    cfg.add_packages(_toml(d), ["d"])
+    content = _toml(d).read_text()
+    assert 'packages = [\n    "a",\n    "b",\n    "c",\n    "d",\n]' in content
+
+
+def test_add_packages_singleline_when_few(tmp_path):
+    text = '[[system]]\npackages = ["a"]\n'
+    d = write_root(tmp_path, text)
+    cfg.add_packages(_toml(d), ["b", "c"])
+    content = _toml(d).read_text()
+    assert 'packages = ["a", "b", "c"]' in content
+
+
+def test_remove_packages_collapses_to_singleline(tmp_path):
+    text = '[[system]]\npackages = [\n    "a",\n    "b",\n    "c",\n    "d",\n]\n'
+    d = write_root(tmp_path, text)
+    cfg.remove_packages(_toml(d), ["a", "b"])
+    content = _toml(d).read_text()
+    assert 'packages = ["c", "d"]' in content
+
+
+def test_add_packages_preserves_comments(tmp_path):
+    text = '[[system]]\npackages = [\n    "a",\n    # tools\n    "b",\n]\n'
+    d = write_root(tmp_path, text)
+    cfg.add_packages(_toml(d), ["c", "d"])
+    content = _toml(d).read_text()
+    assert "# tools" in content
+    assert '"a"' in content
+    assert '"b"' in content
+    assert '"c"' in content
+    assert '"d"' in content
+
+
+def test_remove_packages_preserves_comments(tmp_path):
+    text = '[[system]]\npackages = [\n    "a",\n    # keep this\n    "b",\n    "c",\n    "d",\n    "e",\n]\n'
+    d = write_root(tmp_path, text)
+    cfg.remove_packages(_toml(d), ["a"])
+    content = _toml(d).read_text()
+    assert "# keep this" in content
+    assert '"b"' in content
+    assert '"c"' in content
+    assert '"d"' in content
+    assert '"e"' in content
+    assert '"a"' not in content
