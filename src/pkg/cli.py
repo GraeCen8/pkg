@@ -22,8 +22,6 @@ mode = "pkg"
 # [[system]]
 # name = "base"
 # packages = []
-# modules = []        # top-level dirs that are their own roots
-#                      # (own pkg.toml + configs/)
 
 # [hooks]
 # post = []
