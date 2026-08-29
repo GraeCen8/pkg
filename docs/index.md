@@ -1,29 +1,14 @@
-# pkg
+# pkg Documentation
 
-A declarative wraparound for exactly two things: your **system package manager** and **symlinks**.
+pkg manages packages and configs with a unified, minimal manifest. Quick links:
 
-Write a root `pkg.toml`, drop configs into `configs/`, run `pkg sync`, and the machine matches the manifest.
+- [Features](features.md)
+- [Usage Guide](usage.md)
+- [Configuration reference](configuration.md)
+- [CLI commands](cli.md)
+- [Architecture](architecture.md)
+- [Contributing & Development](contributing.md)
 
-## Quick start
+---
 
-```sh
-# Install
-curl -fsSL https://raw.githubusercontent.com/graecen8/pkg/main/install.sh | bash
-
-# Scaffold a new root
-pkg init ~/dots
-
-# Add your first package
-pkg add zsh
-
-# Sync everything
-pkg sync
-```
-
-## Documentation
-
-- [Configuration reference](configuration.md) — full `pkg.toml` manifest syntax
-- [Architecture](architecture.md) — module responsibilities and data flow
-- [Contributing](contributing.md) — development setup and guidelines
-
-The [README](../README.md) contains a comprehensive user guide covering all features.
+For a full introduction and common workflows, start with the [Usage Guide](usage.md).
