@@ -10,7 +10,6 @@ def test_consent_force_yes(monkeypatch):
     assert cli._consent(True, "run?") is True
     assert calls == []
 
-
 def test_consent_tty_yes(monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(builtins, "input", lambda *a: "yes")

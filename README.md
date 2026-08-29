@@ -171,6 +171,12 @@ across the whole tree.
 
 ## CLI
 
+### One-line install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/graecen8/pkg/main/install.sh | bash
+```
+
 ```
 pkg plan       # diff of both stages, no side effects
                #   --prune also lists orphans that `sync --prune` would remove
