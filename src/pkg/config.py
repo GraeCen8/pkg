@@ -22,6 +22,7 @@ def host_os() -> str:
 class SystemEntry:
     name: str
     packages: list[str]
+    modules: list[str] = field(default_factory=list)
     os: list[str] = field(default_factory=list)
     profiles: list[str] = field(default_factory=list)
 
@@ -58,7 +59,6 @@ class Root:
         with open(pkg_toml, "rb") as fh:
             data = tomllib.load(fh)
         manager = (data.get("manager") or {}).get("name") or None
-        modules = list((data.get("modules") or {}).get("on", []))
         cfg = data.get("config") or {}
         stow = [s for s in cfg.get("stow", [])]
         mode = cfg.get("mode", "pkg")
@@ -69,6 +69,7 @@ class Root:
             SystemEntry(
                 name=e.get("name", "default"),
                 packages=[p for p in e.get("packages", [])],
+                modules=[m for m in e.get("modules", [])],
                 os=[o for o in e.get("os", [])],
                 profiles=[p for p in e.get("profiles", [])],
             )
@@ -82,7 +83,7 @@ class Root:
         return cls(
             dir=root_dir.resolve(),
             manager=manager,
-            modules=modules,
+            modules=[],
             stow=stow,
             mode=mode,
             systems=systems,
@@ -97,11 +98,24 @@ class Root:
         )
 
 
+def _active_modules(root: Root) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for entry in root.systems:
+        if entry.applies(root.profiles):
+            for m in entry.modules:
+                if m not in seen:
+                    seen.add(m)
+                    result.append(m)
+    return result
+
+
 def roots_in_order(root_dir: Path) -> list[Root]:
     order: list[Root] = []
 
     def visit(d: Path, top: bool) -> None:
         root = Root.load(d, top)
+        root.modules = _active_modules(root)
         if not root.top and root.manager:
             print(
                 f"warning: {root.dir}/pkg.toml: [manager] applies only at the top root; ignored",

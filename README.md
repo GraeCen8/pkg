@@ -12,10 +12,10 @@ and **symlinks**. Write a root `pkg.toml`, drop configs into `configs/`, run
 ~/dots/
 ├─ pkg.toml                    # main manifest
 ├─ configs/<name>/             # main's configs
-├─ <module>/                   # enabled module (top-level dir, own root)
+├─ <module>/                   # enabled module (declared in [[system]] modules)
 │   ├─ pkg.toml
 │   └─ configs/
-└─ <module2>/                  # disabled = not in [modules], just ignored
+└─ <module2>/                  # not declared = ignored
 ```
 
 The root is anywhere a `pkg.toml` + `configs/` lives; `~/dots` is just the
@@ -29,9 +29,6 @@ url = "git@github.com:you/dots.git"   # optional; sync runs `git pull --ff-only`
 
 [manager]
 name = "apt"                # optional; auto-detect otherwise (top root only)
-
-[modules]
-on = ["nvim", "kitty"]      # top-level dirs to treat as embedded roots
 
 [config]
 stow = ["zsh"]              # these configs use stow mode
@@ -154,10 +151,30 @@ the review comes back next sync. `-y/--yes` counts as consent.
 
 ## Modules
 
-`[modules] on` enables top-level dirs as embedded roots. Each module has its own
-`pkg.toml` + `configs/`, obeys the same config-mapping rules, and can itself
-declare `[modules]` for nesting. Enabled-but-missing module (or a module missing
-its `pkg.toml`) is a hard error.
+Modules are declared in `[[system]]` blocks with the `modules` key. A module is
+a top-level dir that is its own root (has its own `pkg.toml` + `configs/`).
+
+```toml
+[[system]]
+packages = ["bash"]
+modules = ["nvim", "kitty"]    # these dirs are embedded roots
+```
+
+Modules respect `os` and `profiles` filters, so you can scope modules to
+specific machines:
+
+```toml
+[[system]]
+os = ["linux"]
+modules = ["linux-tools"]
+
+[[system]]
+os = ["darwin"]
+modules = ["mac-tools"]
+```
+
+Modules can themselves declare modules for nesting. Enabled-but-missing module
+(or a module missing its `pkg.toml`) is a hard error.
 
 **Apply order is depth-first, modules before main:**
 module's modules → module → … → main. `[[system]]` packages and hooks merge

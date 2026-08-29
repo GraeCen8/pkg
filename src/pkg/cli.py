@@ -17,13 +17,11 @@ mode = "pkg"
 # stow = []       # these configs mirror into $HOME (GNU stow style)
 # mode = "stow"        # make every config stow-style
 
-# [modules]
-# on = []        # top-level dirs that are their own roots
-#                      # (own pkg.toml + configs/)
-
 # [[system]]
 # name = "base"
 # packages = []
+# modules = []        # top-level dirs that are their own roots
+#                      # (own pkg.toml + configs/)
 
 # [hooks]
 # post = []

@@ -8,8 +8,6 @@ bat = { apt = "bat", pacman = "bat", brew = "bat" }
 mode = "pkg"
 # stow = []
 
-# [modules]
-# on = []
-
 [[system]]
 packages = ["bat", "ripgrep"]
+# modules = []

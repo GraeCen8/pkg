@@ -71,26 +71,66 @@ def test_os_filter(monkeypatch, tmp_path):
 
 def test_modules_run_before_root(tmp_path):
     modules = {"nvim": "[config]\n", "kitty": "[config]\n"}
-    d = write_root(tmp_path, '[modules]\non = ["nvim", "kitty"]\n', modules)
+    d = write_root(tmp_path, '[[system]]\nmodules = ["nvim", "kitty"]\n', modules)
     order = cfg.roots_in_order(d)
     assert [r.dir.name for r in order] == ["nvim", "kitty", d.name]
 
 
 def test_nested_modules_depth_first(tmp_path):
     modules = {
-        "nvim": '[modules]\non = ["vim"]\n',
+        "nvim": '[[system]]\nmodules = ["vim"]\n',
         "nvim/vim": "[config]\n",
     }
-    d = write_root(tmp_path, '[modules]\non = ["nvim"]\n', modules)
+    d = write_root(tmp_path, '[[system]]\nmodules = ["nvim"]\n', modules)
     order = cfg.roots_in_order(d)
     assert [r.dir.name for r in order] == ["vim", "nvim", d.name]
     assert [r.top for r in order] == [False, False, True]
 
 
 def test_enabled_missing_module_errors(tmp_path):
-    d = write_root(tmp_path, '[modules]\non = ["ghost"]\n')
+    d = write_root(tmp_path, '[[system]]\nmodules = ["ghost"]\n')
     with pytest.raises(cfg.ConfigError):
         cfg.roots_in_order(d)
+
+
+def test_modules_respect_profiles(tmp_path):
+    text = """
+    [config]
+    profiles = ["work"]
+
+    [[system]]
+    profiles = ["work"]
+    modules = ["work-mod"]
+
+    [[system]]
+    profiles = ["home"]
+    modules = ["home-mod"]
+    """
+    modules = {"work-mod": "[config]\n", "home-mod": "[config]\n"}
+    d = write_root(tmp_path, text, modules)
+    order = cfg.roots_in_order(d)
+    names = [r.dir.name for r in order]
+    assert "work-mod" in names
+    assert "home-mod" not in names
+
+
+def test_modules_respect_os(monkeypatch, tmp_path):
+    text = """
+    [[system]]
+    os = ["linux"]
+    modules = ["linux-mod"]
+
+    [[system]]
+    os = ["darwin"]
+    modules = ["mac-mod"]
+    """
+    modules = {"linux-mod": "[config]\n", "mac-mod": "[config]\n"}
+    d = write_root(tmp_path, text, modules)
+    monkeypatch.setattr(cfg, "host_os", lambda: "linux")
+    order = cfg.roots_in_order(d)
+    names = [r.dir.name for r in order]
+    assert "linux-mod" in names
+    assert "mac-mod" not in names
 
 
 def test_git_url_and_vars(tmp_path):
@@ -108,7 +148,7 @@ def test_git_url_and_vars(tmp_path):
 
 def test_top_only_manager_warns(tmp_path, capsys):
     modules = {"m": '[manager]\nname = "pacman"\n'}
-    d = write_root(tmp_path, '[modules]\non = ["m"]\n', modules)
+    d = write_root(tmp_path, '[[system]]\nmodules = ["m"]\n', modules)
     cfg.roots_in_order(d)
     assert "applies only at the top root" in capsys.readouterr().err
 
