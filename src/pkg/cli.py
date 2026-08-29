@@ -107,7 +107,7 @@ def find_root(explicit: str | None) -> Path:
         mem = linker.remembered_root()
         if mem and (mem / "pkg.toml").is_file():
             d = mem
-            remember = False
+            remember = True
         else:
             d = cfg.ROOT_DEFAULT
             remember = False
