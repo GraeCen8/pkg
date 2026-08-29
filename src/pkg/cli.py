@@ -59,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prune", action="store_true", help="show orphaned links --prune would remove")
 
     s = sub.add_parser("sync", help="sync the machine to the manifest")
+    s.add_argument("directory", nargs="?", default=None, help="root dir to sync")
     s.add_argument("-y", "--yes", action="store_true")
     s.add_argument("--system-only", action="store_true")
     s.add_argument("--configs-only", action="store_true")
@@ -242,7 +243,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
-    root_dir = find_root(args.root)
+    root_dir = find_root(args.root or args.directory)
     home = host()
     manager = get_manager(root_dir)
     roots = cfg.roots_in_order(root_dir)
