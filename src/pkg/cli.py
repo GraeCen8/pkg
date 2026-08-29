@@ -74,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="show package and link state")
     sub.add_parser("unlink", help="remove only symlinks pkg created")
 
+    w = sub.add_parser("watch", help="re-sync when pkg.toml or configs/ changes")
+    w.add_argument("-y", "--yes", action="store_true")
+    w.add_argument("--interval", type=float, default=2.0, help="poll interval in seconds")
+    w.add_argument("--force", action="store_true")
+    w.add_argument("--no-git", action="store_true")
+
     a = sub.add_parser("add", help="install packages and declare them in the manifest")
     a.add_argument("packages", nargs="+", metavar="NAME", help="package(s) to install + declare")
 
@@ -323,6 +329,38 @@ def cmd_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def _snapshot_mtime(root_dir: Path) -> float:
+    latest = (root_dir / "pkg.toml").stat().st_mtime
+    configs = root_dir / "configs"
+    if configs.is_dir():
+        for p in configs.rglob("*"):
+            if p.is_file():
+                latest = max(latest, p.stat().st_mtime)
+    return latest
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    root_dir = find_root(args.root or getattr(args, "directory", None))
+    args.root = str(root_dir)
+    args.yes = True
+    args.prune = False
+    print(out.dim(f"watching {root_dir} (Ctrl+C to stop)"))
+    last = _snapshot_mtime(root_dir)
+    while True:
+        time.sleep(args.interval)
+        try:
+            now = _snapshot_mtime(root_dir)
+        except FileNotFoundError:
+            continue
+        if now != last:
+            last = now
+            print(out.section("== change detected =="))
+            try:
+                cmd_sync(args)
+            except SystemExit:
+                pass
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     root_dir = find_root(args.root)
     home = host()
@@ -441,6 +479,7 @@ def cmd_remove(args: argparse.Namespace) -> int:
 _CMD = {
     "plan": cmd_plan,
     "sync": cmd_sync,
+    "watch": cmd_watch,
     "status": cmd_status,
     "unlink": cmd_unlink,
     "init": cmd_init,
