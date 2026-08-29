@@ -35,9 +35,7 @@ class SystemEntry:
         """Return True if this entry matches the current OS and profiles."""
         if self.os and host_os() not in {o.lower() for o in self.os}:
             return False
-        return not (
-            self.profiles and not (set(active_profiles or []) & set(self.profiles))
-        )
+        return not (self.profiles and not (set(active_profiles or []) & set(self.profiles)))
 
 
 @dataclass
@@ -180,6 +178,7 @@ def resolve_package_name(pkg: str, manager: str, pkgs_map: dict) -> str:
             return mapped[manager]
     return pkg
 
+
 def all_packages(root_dir: Path, manager: str | None = None) -> list[str]:
     """Collect the deduplicated, ordered list of all packages across all roots.
 
@@ -198,11 +197,12 @@ def all_packages(root_dir: Path, manager: str | None = None) -> list[str]:
     # find package manager (string) if not given
     if manager is None:
         from pkg import pms as pms_mod
+
         mgr = pms_mod.detect(Root.load(root_dir, top=True).manager)
         manager = mgr.name
     packages: list[str] = []
     for root in roots:
-        pkgs_map = root.pkgs_map if hasattr(root, 'pkgs_map') else {}
+        pkgs_map = root.pkgs_map if hasattr(root, "pkgs_map") else {}
         for entry in root.systems:
             if entry.applies(active):
                 for pkg in entry.packages:
@@ -282,7 +282,7 @@ def _format_packages_array(packages: list[str], comments: list[str] | None = Non
 
     items = list(packages)
     if comments:
-        items = items[:len(comments)] + comments + items[len(comments):]
+        items = items[: len(comments)] + comments + items[len(comments) :]
     indent = "    "
     inner = "\n".join(f'{indent}"{p}",' for p in items)
     return f"packages = [\n{inner}\n]"

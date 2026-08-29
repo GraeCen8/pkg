@@ -126,7 +126,10 @@ class Pacman(PackageManager):
         missing = self.check_many(packages)
         if not missing:
             return 0
-        if self._run_silent(self._sudo([self._bin(), "-S", "--noconfirm", "--needed", *missing])) != 0:
+        if (
+            self._run_silent(self._sudo([self._bin(), "-S", "--noconfirm", "--needed", *missing]))
+            != 0
+        ):
             return 1
         return self._verify(missing)
 

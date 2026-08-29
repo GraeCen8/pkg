@@ -460,7 +460,10 @@ def cmd_add(args: argparse.Namespace) -> int:
     for pkg in added:
         print(f"  {out.cyan('+')} {pkg} (declared in manifest)")
 
-    pkgs = [cfg.resolve_package_name(p, manager.name, cfg.Root.load(root_dir).pkgs_map) for p in args.packages]
+    pkgs = [
+        cfg.resolve_package_name(p, manager.name, cfg.Root.load(root_dir).pkgs_map)
+        for p in args.packages
+    ]
     missing = manager.check_many(pkgs)
     present = [p for p, mapped in zip(args.packages, pkgs) if mapped not in missing]
     for pkg in present:
@@ -481,10 +484,19 @@ def cmd_remove(args: argparse.Namespace) -> int:
     manager = get_manager(root_dir)
     pkg_toml = root_dir / "pkg.toml"
 
-    pkgs = [cfg.resolve_package_name(p, manager.name, cfg.Root.load(root_dir).pkgs_map) for p in args.packages]
+    pkgs = [
+        cfg.resolve_package_name(p, manager.name, cfg.Root.load(root_dir).pkgs_map)
+        for p in args.packages
+    ]
     present = [p for p, mapped in zip(args.packages, pkgs) if manager.check(mapped)]
     if present:
-        rc = _system_remove(manager, [cfg.resolve_package_name(p, manager.name, cfg.Root.load(root_dir).pkgs_map) for p in present])
+        rc = _system_remove(
+            manager,
+            [
+                cfg.resolve_package_name(p, manager.name, cfg.Root.load(root_dir).pkgs_map)
+                for p in present
+            ],
+        )
         if rc:
             return 1
 
