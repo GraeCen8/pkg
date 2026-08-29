@@ -187,16 +187,15 @@ def _consent(force_yes: bool, prompt: str) -> bool:
 
 
 def _system_install(manager: pms_mod.PackageManager, missing: list[str]) -> int:
-    rc = _spinner_run("installing", missing, lambda: manager.install(missing))
-    if rc:
-        still = manager.check_many(missing)
-        if still:
-            print(f"  {out.red('error')}: package(s) not found: {', '.join(still)}")
+    rc = 0
+    for pkg in missing:
+        rci = _spinner_run("installing", [pkg], lambda p=pkg: manager.install([p]))
+        if rci:
+            print(f"    {out.red('error')}: {pkg}")
+            rc = rci
         else:
-            print(out.red("  error: install failed"))
-        return rc
-    print(f"  {out.green('ok')} — installed {len(missing)} package(s)")
-    return 0
+            print(f"  {out.green(chr(0x2713))} {pkg}")
+    return rc
 
 
 def _system_remove(manager: pms_mod.PackageManager, packages: list[str]) -> int:
