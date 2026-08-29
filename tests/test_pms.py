@@ -126,3 +126,161 @@ def test_verify_after_failed_install_returns_1(monkeypatch):
     pm = pms.Pacman()
     pm.check = lambda p: False
     assert pm.install(["ghost"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# detect() tests
+# ---------------------------------------------------------------------------
+
+
+def _mock_os_release(content: str):
+    """Return a function that mocks Path.read_text for /etc/os-release."""
+
+    def fake_read_text(self, *args, **kwargs):
+        if str(self) == "/etc/os-release":
+            return content
+        raise OSError(f"unexpected read: {self}")
+
+    return fake_read_text
+
+
+def test_detect_linux_debian(monkeypatch):
+    monkeypatch.setattr(pms.Path, "read_text", _mock_os_release("ID=ubuntu\n"))
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    result = pms.detect()
+    assert isinstance(result, pms.Apt)
+
+
+def test_detect_linux_arch(monkeypatch):
+    monkeypatch.setattr(pms.Path, "read_text", _mock_os_release("ID=arch\n"))
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    result = pms.detect()
+    assert isinstance(result, pms.Pacman)
+
+
+def test_detect_linux_fedora(monkeypatch):
+    monkeypatch.setattr(pms.Path, "read_text", _mock_os_release("ID=fedora\n"))
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    result = pms.detect()
+    assert isinstance(result, pms.Dnf)
+
+
+def test_detect_linux_id_like_fallback(monkeypatch):
+    monkeypatch.setattr(
+        pms.Path,
+        "read_text",
+        _mock_os_release('ID=centos\nID_LIKE="rhel fedora"\n'),
+    )
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    result = pms.detect()
+    assert isinstance(result, pms.Dnf)
+
+
+def test_detect_linux_alpine(monkeypatch):
+    monkeypatch.setattr(pms.Path, "read_text", _mock_os_release("ID=alpine\n"))
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    result = pms.detect()
+    assert isinstance(result, pms.Apk)
+
+
+def test_detect_linux_opensuse(monkeypatch):
+    monkeypatch.setattr(
+        pms.Path,
+        "read_text",
+        _mock_os_release('ID=opensuse-leap\nID_LIKE="opensuse suse"\n'),
+    )
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    result = pms.detect()
+    assert isinstance(result, pms.Zypper)
+
+
+def test_detect_override_valid(monkeypatch):
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(pms.shutil, "which", lambda name: None)
+    result = pms.detect(override="apt")
+    assert isinstance(result, pms.Apt)
+
+
+def test_detect_override_case_insensitive(monkeypatch):
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(pms.shutil, "which", lambda name: None)
+    result = pms.detect(override="DNF")
+    assert isinstance(result, pms.Dnf)
+
+
+def test_detect_override_invalid(monkeypatch):
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    with pytest.raises(SystemExit, match="unknown package manager"):
+        pms.detect(override="nonexistent")
+
+
+def test_detect_darwin_returns_brew(monkeypatch):
+    monkeypatch.setattr(pms.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(pms, "_brew", lambda: "/opt/homebrew/bin/brew")
+    result = pms.detect()
+    assert isinstance(result, pms.Brew)
+
+
+def test_detect_os_release_missing(monkeypatch):
+    def raise_oserror(self, *a, **kw):
+        raise OSError("no file")
+
+    monkeypatch.setattr(pms.Path, "read_text", raise_oserror)
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    with pytest.raises(SystemExit, match="cannot auto-detect"):
+        pms.detect()
+
+
+def test_detect_unrecognized_linux(monkeypatch):
+    monkeypatch.setattr(pms.Path, "read_text", _mock_os_release("ID=void\n"))
+    monkeypatch.setattr(pms.platform, "system", lambda: "Linux")
+    with pytest.raises(SystemExit, match="cannot auto-detect"):
+        pms.detect()
+
+
+# ---------------------------------------------------------------------------
+# Pacman yay fallback
+# ---------------------------------------------------------------------------
+
+
+def test_pacman_uses_yay_when_available(monkeypatch):
+    calls, installed = stateful_runner(monkeypatch)
+    monkeypatch.setattr(pms.shutil, "which", lambda name: "/usr/bin/yay" if name == "yay" else None)
+    pm = pms.Pacman()
+    pm.check = lambda p: p in installed
+    assert pm.install([PACKAGE]) == 0
+    assert ["sudo", "yay", "-S", "--noconfirm", "--needed", PACKAGE] in calls
+
+
+def test_pacman_falls_back_to_pacman(monkeypatch):
+    calls, installed = stateful_runner(monkeypatch)
+    monkeypatch.setattr(pms.shutil, "which", lambda name: None)
+    pm = pms.Pacman()
+    pm.check = lambda p: p in installed
+    assert pm.install([PACKAGE]) == 0
+    assert ["sudo", "pacman", "-S", "--noconfirm", "--needed", PACKAGE] in calls
+
+
+# ---------------------------------------------------------------------------
+# Brew edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_brew_init_exits_when_not_found(monkeypatch):
+    monkeypatch.setattr(pms.shutil, "which", lambda name: None)
+    monkeypatch.setattr("os.path.exists", lambda path: False)
+    with pytest.raises(SystemExit, match="cannot find brew"):
+        pms.Brew()
+
+
+def test_brew_check_uses_detected_path(monkeypatch):
+    monkeypatch.setattr(pms, "_brew", lambda: "/custom/brew")
+    calls = []
+    monkeypatch.setattr(
+        pms.subprocess,
+        "run",
+        lambda cmd, **kw: (calls.append(cmd), FakeResult(0))[1],
+    )
+    pm = pms.Brew()
+    pm.check("git")
+    assert calls[-1] == ["/custom/brew", "list", "--formula", "git"]

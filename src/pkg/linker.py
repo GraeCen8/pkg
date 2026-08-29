@@ -1,3 +1,5 @@
+"""Symlink planning, conflict detection, state tracking, and apply/prune operations."""
+
 from __future__ import annotations
 
 import hashlib
@@ -14,11 +16,13 @@ from pkg.config import ConfigError, host_os, roots_in_order
 
 
 class ConflictError(Exception):
-    pass
+    """Raised when a target path conflicts with an existing file or symlink."""
 
 
 @dataclass
 class LinkItem:
+    """A single symlink or rendered file to create under the home directory."""
+
     target: Path
     source: Path
     kind: str
@@ -27,6 +31,7 @@ class LinkItem:
 
 
 def state_dir() -> Path:
+    """Return the ``XDG_STATE_HOME/pkg`` directory, creating it if needed."""
     xdg = os.environ.get("XDG_STATE_HOME")
     if xdg:
         return Path(xdg) / "pkg"
@@ -34,10 +39,12 @@ def state_dir() -> Path:
 
 
 def state_file() -> Path:
+    """Return the path to ``links.json`` inside the state directory."""
     return state_dir() / "links.json"
 
 
 def read_link(path: Path) -> str:
+    """Read the target of a symlink, returning an empty string on failure."""
     try:
         return os.readlink(path)
     except OSError:
@@ -72,18 +79,22 @@ def _write_db(db: dict) -> None:
 
 
 def load_state() -> list[dict]:
+    """Return the list of link entries from the state database."""
     return [e for e in _read_db().get("links", []) if isinstance(e, dict)]
 
 
 def load_state_map() -> dict[str, str]:
+    """Return a mapping of target path -> source path from the state database."""
     return {e["target"]: e["source"] for e in load_state() if "target" in e and "source" in e}
 
 
 def load_installed() -> list[str]:
+    """Return the list of previously installed package names from the state database."""
     return [p for p in _read_db().get("installed", []) if isinstance(p, str)]
 
 
 def state_entry(target: Path) -> dict | None:
+    """Return the state entry for *target*, or None if not tracked."""
     for entry in load_state():
         if entry.get("target") == str(target):
             return entry
@@ -91,23 +102,27 @@ def state_entry(target: Path) -> dict | None:
 
 
 def save_state(entries: list[dict]) -> None:
+    """Replace the link entries in the state database with *entries*."""
     db = _read_db()
     db["links"] = entries
     _write_db(db)
 
 
 def record_installed(packages: list[str]) -> None:
+    """Record the current set of declared packages in the state database."""
     db = _read_db()
     db["installed"] = packages
     _write_db(db)
 
 
 def remember_root(path: Path) -> None:
+    """Persist *path* as the last-used root directory."""
     state_dir().mkdir(parents=True, exist_ok=True)
     (state_dir() / "root").write_text(str(path))
 
 
 def remembered_root() -> Path | None:
+    """Return the previously remembered root directory, or None."""
     try:
         value = (state_dir() / "root").read_text().strip()
     except OSError:
@@ -233,6 +248,18 @@ def _plan_one(
 
 
 def plan(root_dir: Path, home: Path) -> list[LinkItem]:
+    """Build the full list of symlink and render items for a root.
+
+    Walks the root and all enabled modules depth-first, collecting
+    LinkItems for each config directory.
+
+    Args:
+        root_dir: Path to the root directory containing pkg.toml.
+        home: Target home directory for symlinks.
+
+    Returns:
+        List of LinkItem objects sorted by target path.
+    """
     items: list[LinkItem] = []
     for root in roots_in_order(root_dir):
         cfgdir = root.dir / "configs"
@@ -254,6 +281,7 @@ def plan(root_dir: Path, home: Path) -> list[LinkItem]:
 
 
 def item_status(item: LinkItem) -> str:
+    """Return the status of *item*: ``'ok'``, ``'new'``, ``'conflict'``, or ``'broken'``."""
     target = item.target
     if item.kind == "render":
         if target.is_symlink() or not target.exists():
@@ -278,6 +306,10 @@ def item_status(item: LinkItem) -> str:
 
 
 def find_conflicts(items: list[LinkItem], home: Path) -> list[str]:
+    """Check for conflicts across a planned set of link items.
+
+    Returns a sorted list of human-readable problem descriptions.
+    """
     problems: set[str] = set()
     seen: dict[Path, Path] = {}
     for item in items:
@@ -378,6 +410,21 @@ def _apply_item(item: LinkItem, home: Path, force: bool, backup_dir: Path) -> bo
 
 
 def apply(items: list[LinkItem], home: Path, force: bool = False) -> list[LinkItem]:
+    """Create symlinks and rendered files for all planned items.
+
+    On failure, any items already created are rolled back.
+
+    Args:
+        items: Planned link items from :func:`plan`.
+        home: Target home directory.
+        force: If True, replace existing targets (backups are kept).
+
+    Returns:
+        List of LinkItem objects that were actually created.
+
+    Raises:
+        ConflictError: On unresolvable conflicts when *force* is False.
+    """
     backup_dir = state_dir() / "backup"
     created: list[LinkItem] = []
     try:
@@ -400,6 +447,7 @@ def apply(items: list[LinkItem], home: Path, force: bool = False) -> list[LinkIt
 
 
 def orphaned(items: list[LinkItem]) -> list[str]:
+    """Return sorted list of target paths owned by pkg but not in *items*."""
     desired = {str(item.target) for item in items}
     owned = []
     for entry in load_state():
@@ -415,6 +463,13 @@ def orphaned(items: list[LinkItem]) -> list[str]:
 
 
 def prune(items: list[LinkItem], home: Path) -> tuple[int, list[str]]:
+    """Remove orphaned symlinks and rendered files not in *items*.
+
+    Only removes targets still owned by pkg (matching source or hash).
+
+    Returns:
+        Tuple of (count_removed, list_of_notice_strings).
+    """
     desired = {str(item.target) for item in items}
     kept: list[dict] = []
     removed = 0
@@ -445,6 +500,7 @@ def prune(items: list[LinkItem], home: Path) -> tuple[int, list[str]]:
 
 
 def unlink(home: Path) -> int:
+    """Remove all symlinks and rendered files that pkg owns.  Return count removed."""
     entries = load_state()
     kept: list[dict] = []
     removed = 0

@@ -1,3 +1,5 @@
+"""Manifest parsing, root resolution, and package list aggregation."""
+
 from __future__ import annotations
 
 import json
@@ -11,15 +13,18 @@ ROOT_DEFAULT = Path("~/dots").expanduser()
 
 
 class ConfigError(Exception):
-    pass
+    """Raised when the manifest or directory layout is invalid."""
 
 
 def host_os() -> str:
+    """Return the current OS name in lowercase (e.g. ``'linux'``, ``'darwin'``)."""
     return platform.system().lower()
 
 
 @dataclass
 class SystemEntry:
+    """A single ``[[system]]`` block declaring packages, modules, and filters."""
+
     name: str
     packages: list[str]
     modules: list[str] = field(default_factory=list)
@@ -27,6 +32,7 @@ class SystemEntry:
     profiles: list[str] = field(default_factory=list)
 
     def applies(self, active_profiles: list[str] | None = None) -> bool:
+        """Return True if this entry matches the current OS and profiles."""
         if self.os and host_os() not in {o.lower() for o in self.os}:
             return False
         return not (
@@ -36,6 +42,8 @@ class SystemEntry:
 
 @dataclass
 class Root:
+    """Parsed representation of a root ``pkg.toml`` and its settings."""
+
     dir: Path
     manager: str | None
     modules: list[str]
@@ -53,6 +61,19 @@ class Root:
 
     @classmethod
     def load(cls, root_dir: Path, top: bool = True) -> Root:
+        """Load and parse a ``pkg.toml`` from *root_dir*.
+
+        Args:
+            root_dir: Directory containing ``pkg.toml``.
+            top: Whether this is the top-level root (only the top root
+                may declare ``[manager]``).
+
+        Returns:
+            A populated Root dataclass.
+
+        Raises:
+            ConfigError: If the manifest is missing or has invalid fields.
+        """
         pkg_toml = root_dir / "pkg.toml"
         if not pkg_toml.is_file():
             raise ConfigError(f"{root_dir}: no pkg.toml found")
@@ -99,6 +120,7 @@ class Root:
 
 
 def _active_modules(root: Root) -> list[str]:
+    """Return the deduplicated list of module names enabled by applicable system blocks."""
     seen: set[str] = set()
     result: list[str] = []
     for entry in root.systems:
@@ -111,6 +133,20 @@ def _active_modules(root: Root) -> list[str]:
 
 
 def roots_in_order(root_dir: Path) -> list[Root]:
+    """Return all roots (including modules) in depth-first apply order.
+
+    Modules are visited before their parent, so the returned list is safe
+    to iterate in order for syncing.
+
+    Args:
+        root_dir: Path to the top-level root directory.
+
+    Returns:
+        List of Root objects in depth-first, modules-before-parent order.
+
+    Raises:
+        ConfigError: If a declared module directory or its ``pkg.toml`` is missing.
+    """
     order: list[Root] = []
 
     def visit(d: Path, top: bool) -> None:
@@ -133,6 +169,11 @@ def roots_in_order(root_dir: Path) -> list[Root]:
 
 
 def resolve_package_name(pkg: str, manager: str, pkgs_map: dict) -> str:
+    """Map a package name through ``[pkgs_map]`` for the given manager.
+
+    If *pkg* has a mapping for *manager* in *pkgs_map*, return the
+    mapped name; otherwise return *pkg* unchanged.
+    """
     if pkg in pkgs_map:
         mapped = pkgs_map[pkg]
         if isinstance(mapped, dict) and manager in mapped:
@@ -140,6 +181,18 @@ def resolve_package_name(pkg: str, manager: str, pkgs_map: dict) -> str:
     return pkg
 
 def all_packages(root_dir: Path, manager: str | None = None) -> list[str]:
+    """Collect the deduplicated, ordered list of all packages across all roots.
+
+    Applies OS and profile filters, resolves ``[pkgs_map]`` mappings, and
+    preserves insertion order.
+
+    Args:
+        root_dir: Path to the top-level root directory.
+        manager: Package manager name for mapping. Auto-detected if None.
+
+    Returns:
+        List of unique package names in declaration order.
+    """
     active = Root.load(root_dir, top=True).profiles
     roots = roots_in_order(root_dir)
     # find package manager (string) if not given
@@ -160,6 +213,7 @@ def all_packages(root_dir: Path, manager: str | None = None) -> list[str]:
 
 
 def _system_block_ranges(lines: list[str]) -> list[tuple[int, int]]:
+    """Return (start, end) line ranges for each ``[[system]]`` block."""
     starts = [i for i, line in enumerate(lines) if line.strip() == "[[system]]"]
     return [
         (start, starts[k + 1] if k + 1 < len(starts) else len(lines))
@@ -168,6 +222,7 @@ def _system_block_ranges(lines: list[str]) -> list[tuple[int, int]]:
 
 
 def _unfiltered_block_index(data: dict) -> int | None:
+    """Return the index of the first ``[[system]]`` block with no OS or profile filters."""
     blocks = data.get("system")
     if not isinstance(blocks, list):
         return None
@@ -178,17 +233,20 @@ def _unfiltered_block_index(data: dict) -> int | None:
 
 
 def _os_matches(values: list[str]) -> bool:
+    """Return True if any value in *values* matches the current OS."""
     h = host_os()
     return any(h == v.lower() for v in values)
 
 
 def _profiles_match(block_profiles: list[str], active: list[str]) -> bool:
+    """Return True if *block_profiles* overlaps with *active* profiles (or block has none)."""
     if not block_profiles:
         return True
     return bool(set(active) & set(block_profiles))
 
 
 def _remove_block_index(data: dict, packages: list[str], active_profiles: list[str]) -> int | None:
+    """Return the index of the first ``[[system]]`` block containing any of *packages*."""
     blocks = data.get("system")
     if not isinstance(blocks, list):
         return None
@@ -280,8 +338,18 @@ def _edit_packages(pkg_toml: Path, packages: list[str], add: bool) -> tuple[list
 
 
 def add_packages(pkg_toml: Path, packages: list[str]) -> tuple[list[str], list[str]]:
+    """Add *packages* to the unfiltered ``[[system]]`` block in *pkg_toml*.
+
+    Returns:
+        Tuple of (before, after) package lists for the affected block.
+    """
     return _edit_packages(pkg_toml, packages, add=True)
 
 
 def remove_packages(pkg_toml: Path, packages: list[str]) -> tuple[list[str], list[str]]:
+    """Remove *packages* from the matching ``[[system]]`` block in *pkg_toml*.
+
+    Returns:
+        Tuple of (before, after) package lists for the affected block.
+    """
     return _edit_packages(pkg_toml, packages, add=False)

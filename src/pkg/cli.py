@@ -1,3 +1,5 @@
+"""Command-line interface and command dispatch for pkg."""
+
 from __future__ import annotations
 
 import argparse
@@ -40,6 +42,7 @@ _LINK_MARKS = {
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build and return the argument parser for the ``pkg`` CLI."""
     parser = argparse.ArgumentParser(
         prog="pkg",
         description="pkg tool which can it all: system packages & dotfiles",
@@ -101,6 +104,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def find_root(explicit: str | None) -> Path:
+    """Resolve the root directory to use for a command.
+
+    Priority: explicit ``-R``/argument > cwd if it has ``pkg.toml`` >
+    remembered root > default ``~/dots``.
+    """
     if explicit:
         d = Path(explicit).expanduser()
         remember = True
@@ -124,14 +132,21 @@ def find_root(explicit: str | None) -> Path:
 
 
 def get_manager(root_dir: Path) -> pms_mod.PackageManager:
+    """Detect the package manager for *root_dir*."""
     return pms_mod.detect(cfg.Root.load(root_dir, top=True).manager)
 
 
 def host() -> Path:
+    """Return the user's home directory."""
     return Path.home()
 
 
 def pull_roots(root_dir: Path, root_filter: list[cfg.Root] | None = None) -> None:
+    """Git-pull all roots that declare a ``[git] url``.
+
+    Exits on failure.  If *root_filter* is provided, only those roots
+    are checked.
+    """
     for root in root_filter or cfg.roots_in_order(root_dir):
         if not root.git_url:
             continue
