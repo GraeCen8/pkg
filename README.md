@@ -4,12 +4,6 @@ A declarative wraparound for exactly two things: your **system package manager**
 and **symlinks**. Write a root `pkg.toml`, drop configs into `configs/`, run
 `pkg sync`, and the machine matches the manifest.
 
-**Sync is one-directional:** it installs missing packages, creates missing
-symlinks, and fixes drifted ones so the machine matches the manifest. It never
-removes anything on its own. `pkg sync --prune` additionally removes orphaned
-links for configs dropped from the manifest; removed **packages** are only ever
-listed for review, never uninstalled.
-
 > **Non-goals (v0):** no building from source, no content store, no secrets.
 
 ## Layout
