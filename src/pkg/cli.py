@@ -44,7 +44,7 @@ _LINK_MARKS = {
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pkg",
-        description="pkg tool which can do more: system packages & symlinks",
+        description="pkg tool which can it all: system packages & dotfiles",
     )
     parser.add_argument(
         "--version",
