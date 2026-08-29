@@ -94,14 +94,17 @@ class Pacman(PackageManager):
     name = "pacman"
     label = "Arch Linux (pacman)"
 
+    def _bin(self) -> str:
+        return "yay" if shutil.which("yay") else "pacman"
+
     def check(self, package: str) -> bool:
-        return self._quiet("pacman", "-Q", package)
+        return self._quiet(self._bin(), "-Q", package)
 
     def install(self, packages: list[str]) -> int:
         missing = self.check_many(packages)
         if not missing:
             return 0
-        if self._run_silent(self._sudo(["pacman", "-S", "--noconfirm", "--needed", *missing])) != 0:
+        if self._run_silent(self._sudo([self._bin(), "-S", "--noconfirm", "--needed", *missing])) != 0:
             return 1
         return self._verify(missing)
 
@@ -109,7 +112,7 @@ class Pacman(PackageManager):
         present = [p for p in packages if self.check(p)]
         if not present:
             return 0
-        if self._run_silent(self._sudo(["pacman", "-Rns", "--noconfirm", *present])) != 0:
+        if self._run_silent(self._sudo([self._bin(), "-Rns", "--noconfirm", *present])) != 0:
             return 1
         return 1 if [p for p in present if self.check(p)] else 0
 

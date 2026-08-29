@@ -24,6 +24,7 @@ def stateful_runner(monkeypatch) -> tuple[list[list[str]], set[str]]:
         return FakeResult()
 
     monkeypatch.setattr(pms.subprocess, "run", fake_run)
+    monkeypatch.setattr(pms.shutil, "which", lambda name: None)
     return calls, installed
 
 
