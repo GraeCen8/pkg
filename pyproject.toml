@@ -8,7 +8,29 @@ version = "0.1.0"
 description = "Declarative wraparound: symlinks + your system package manager"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Grae Ceney" }]
+keywords = ["dotfiles", "package-manager", "symlinks", "declarative", "config"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/graecen8/pkg"
+Repository = "https://github.com/graecen8/pkg"
+Changelog = "https://github.com/graecen8/pkg/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
