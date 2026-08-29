@@ -7,7 +7,7 @@ from pkg import linker
 
 
 @pytest.fixture(autouse=True)
-def _state_home(tmp_path, monkeypatch):
+def state_home(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     return tmp_path / "state"
 
