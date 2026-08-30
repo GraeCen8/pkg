@@ -292,7 +292,7 @@ def _brew() -> str | None:
 
 
 class Brew(PackageManager):
-    """macOS Homebrew backend."""
+    """macOS Homebrew backend with formula and cask support."""
 
     name = "brew"
     label = "Homebrew (brew)"
@@ -303,14 +303,63 @@ class Brew(PackageManager):
             sys.exit("cannot find brew")
         self._brew = exe
 
+    def _is_cask(self, package: str) -> bool:
+        """Return True if *package* is a Homebrew cask."""
+        return self._quiet(self._brew, "list", "--cask", package)
+
     def check(self, package: str) -> bool:
-        return self._quiet(self._brew, "list", "--formula", package)
+        return self._quiet(self._brew, "list", "--formula", package) or self._is_cask(package)
 
     def install(self, packages: list[str]) -> tuple[int, str]:
         missing = self.check_many(packages)
         if not missing:
             return 0, ""
-        rc, error = self._run_captured([self._brew, "install", *missing])
+        formulas = [p for p in missing if not self._is_cask(p)]
+        casks = [p for p in missing if self._is_cask(p)]
+        if formulas:
+            rc, error = self._run_captured([self._brew, "install", *formulas])
+            if rc != 0:
+                return rc, error
+        if casks:
+            rc, error = self._run_captured([self._brew, "install", "--cask", *casks])
+            if rc != 0:
+                return rc, error
+        return self._verify(missing)
+
+    def remove(self, packages: list[str]) -> tuple[int, str]:
+        present = [p for p in packages if self.check(p)]
+        if not present:
+            return 0, ""
+        formulas = [p for p in present if not self._is_cask(p)]
+        casks = [p for p in present if self._is_cask(p)]
+        if formulas:
+            rc, error = self._run_captured([self._brew, "uninstall", *formulas])
+            if rc != 0:
+                return rc, error
+        if casks:
+            rc, error = self._run_captured([self._brew, "uninstall", "--cask", *casks])
+            if rc != 0:
+                return rc, error
+        remaining = [p for p in present if self.check(p)]
+        if remaining:
+            return 1, f"could not remove: {', '.join(remaining)}"
+        return 0, ""
+
+
+class Flatpak(PackageManager):
+    """Flatpak backend for universal Linux packages."""
+
+    name = "flatpak"
+    label = "Flatpak"
+
+    def check(self, package: str) -> bool:
+        return self._quiet("flatpak", "list", "--app", "--columns=application", package)
+
+    def install(self, packages: list[str]) -> tuple[int, str]:
+        missing = self.check_many(packages)
+        if not missing:
+            return 0, ""
+        rc, error = self._run_captured(["flatpak", "install", "-y", "flathub", *missing])
         if rc != 0:
             return rc, error
         return self._verify(missing)
@@ -319,7 +368,7 @@ class Brew(PackageManager):
         present = [p for p in packages if self.check(p)]
         if not present:
             return 0, ""
-        rc, error = self._run_captured([self._brew, "uninstall", *present])
+        rc, error = self._run_captured(["flatpak", "uninstall", "-y", *present])
         if rc != 0:
             return rc, error
         remaining = [p for p in present if self.check(p)]
@@ -328,7 +377,7 @@ class Brew(PackageManager):
         return 0, ""
 
 
-_REGISTRY = (Pacman, Apt, Dnf, Zypper, Apk, Brew)
+_REGISTRY = (Pacman, Apt, Dnf, Zypper, Apk, Brew, Flatpak)
 
 _FAMILIES = (
     (("arch", "manjaro", "endeavouros", "garuda", "cachyos"), Pacman),

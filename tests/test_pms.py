@@ -40,6 +40,7 @@ def stateful_runner(monkeypatch) -> tuple[list[list[str]], set[str]]:
 
     monkeypatch.setattr(pms.subprocess, "run", fake_run)
     monkeypatch.setattr(pms.PackageManager, "_run_captured", fake_captured)
+    monkeypatch.setattr(pms.Brew, "_is_cask", lambda self, p: False)
     monkeypatch.setattr(pms.shutil, "which", lambda name: None)
     return calls, installed
 
