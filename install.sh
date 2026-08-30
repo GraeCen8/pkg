@@ -57,7 +57,11 @@ printf 'from pkg.cli import main\nraise SystemExit(main())\n' > .stage/__main__.
 rm -rf .stage
 chmod +x ./pkg
 
-echo "Installing pkg to /usr/bin/pkg (sudo required)..."
-sudo cp ./pkg /usr/bin/pkg
+echo "Installing pkg to /usr/bin/pkg..."
+if [ "$(id -u)" -eq 0 ]; then
+  cp ./pkg /usr/bin/pkg
+else
+  sudo cp ./pkg /usr/bin/pkg
+fi
 
 echo "Installation complete! Run 'pkg --help' to verify."
