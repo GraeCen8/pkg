@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="cmd")
 
-    p = sub.add_parser("plan", help="show what would change, no side effects")
+    p = sub.add_parser("diff", aliases=["plan"], help="show what would change, no side effects")
     p.add_argument("--system-only", action="store_true")
     p.add_argument("--configs-only", action="store_true")
     p.add_argument("--prune", action="store_true", help="show orphaned links --prune would remove")
@@ -91,7 +91,9 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("target", help="dir to scaffold, e.g. ~/dots or .")
     i.add_argument("--force", action="store_true")
 
-    for sp in sub.choices.values():
+    for name, sp in sub.choices.items():
+        if name in ("plan",):
+            continue
         sp.add_argument(
             "-R",
             "--root",
@@ -183,17 +185,25 @@ def _spinner(message: str) -> threading.Event:
     return stop
 
 
-def _spinner_run(verb: str, names: list[str], call) -> int:
+def _spinner_run(verb: str, names: list[str], call) -> tuple[int, str]:
+    """Run *call* with a spinner (interactive) or plain progress (non-interactive).
+
+    Returns (returncode, error_message) tuple.
+    """
     label = ", ".join(names)
     use_spinner = colors.enabled(sys.stdout)
     if use_spinner:
         stop = _spinner(f"{verb} {label}")
-    else:
-        print(f"  {verb} {label} ...")
-    rc = call()
-    if use_spinner:
+        rc, err = call()
         stop.set()
-    return rc
+    else:
+        print(f"  {verb} {label} ...", end="", flush=True)
+        rc, err = call()
+        if rc:
+            print(f" {out.red('failed')}")
+        else:
+            print(f" {out.green('ok')}")
+    return rc, err
 
 
 def _consent(force_yes: bool, prompt: str) -> bool:
@@ -209,12 +219,13 @@ def _system_install(manager: pms_mod.PackageManager, missing: list[str]) -> int:
     for pkg in missing:
         rci, err = _spinner_run("installing", [pkg], lambda p=pkg: manager.install([p]))
         if rci:
-            print(f"    {out.red('error')}: {pkg}")
+            if colors.enabled(sys.stdout):
+                print(f"    {out.red('error')}: {pkg}")
             if err:
                 for line in err.splitlines()[:5]:
                     print(f"      {line}")
             rc = rci
-        else:
+        elif colors.enabled(sys.stdout):
             print(f"  {out.green(chr(0x2713))} {pkg}")
     return rc
 
@@ -235,8 +246,8 @@ def _system_remove(manager: pms_mod.PackageManager, packages: list[str]) -> int:
     return 0
 
 
-def cmd_plan(args: argparse.Namespace) -> int:
-    """``pkg plan`` — show what sync would do without making changes."""
+def cmd_diff(args: argparse.Namespace) -> int:
+    """``pkg diff`` — show what sync would do without making changes."""
     root_dir = find_root(args.root)
     home = host()
     manager = get_manager(root_dir)
@@ -250,16 +261,23 @@ def cmd_plan(args: argparse.Namespace) -> int:
     problems: list[str] = []
     pkgs = cfg.all_packages(root_dir, manager.name)
     if not args.configs_only:
-        for pkg in manager.check_many(pkgs):
-            print(f"  {out.green('+')} {pkg}")
-        if manager.check_many(pkgs):
+        missing = manager.check_many(pkgs)
+        if missing:
+            for pkg in missing:
+                print(f"  {out.green('+')} {pkg}")
             problems.append("packages to install")
+        else:
+            print(f"  {out.green('all packages present')}")
     print(out.section("== links =="))
     items = linker.plan(root_dir, home)
     print_links(items)
     if args.prune:
-        for target in linker.orphaned(items):
-            print(f"  {out.yellow('-')} {target} (pruned on `sync --prune`)")
+        orphans = linker.orphaned(items)
+        if orphans:
+            for target in orphans:
+                print(f"  {out.yellow('-')} {target} (pruned on `sync --prune`)")
+        else:
+            print(out.dim("  no orphans"))
     problems.extend(linker.find_conflicts(items, home))
     for problem in problems:
         print(f"  {out.red('!')} {problem}", file=sys.stderr)
@@ -555,7 +573,8 @@ def cmd_remove(args: argparse.Namespace) -> int:
 
 
 _CMD = {
-    "plan": cmd_plan,
+    "diff": cmd_diff,
+    "plan": cmd_diff,
     "sync": cmd_sync,
     "watch": cmd_watch,
     "status": cmd_status,

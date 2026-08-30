@@ -67,6 +67,7 @@ def _fake_pm(monkeypatch, installed=None):
 
 def test_build_parser_subcommands():
     parser = cli.build_parser()
+    assert parser.parse_args(["diff"]).cmd == "diff"
     assert parser.parse_args(["plan"]).cmd == "plan"
     assert parser.parse_args(["sync"]).cmd == "sync"
     assert parser.parse_args(["status"]).cmd == "status"
@@ -174,7 +175,7 @@ def test_cmd_plan_shows_packages_and_links(tmp_path, state_home, capsys):
         monkeypatches.setattr(cli, "host", lambda: home)
         _fake_pm(monkeypatches, installed=set())
         args = SimpleNamespace(root=None, system_only=False, configs_only=False, prune=False)
-        rc = cli.cmd_plan(args)
+        rc = cli.cmd_diff(args)
         assert rc == 1  # 1 because conflicts exist (existing symlink from real home)
         out = capsys.readouterr().out
         assert "== system ==" in out
@@ -196,7 +197,7 @@ def test_cmd_plan_configs_only(tmp_path, state_home, capsys):
         monkeypatches.setattr(cli, "host", lambda: home)
         _fake_pm(monkeypatches, installed=set())
         args = SimpleNamespace(root=None, system_only=False, configs_only=True, prune=False)
-        cli.cmd_plan(args)
+        cli.cmd_diff(args)
         out = capsys.readouterr().out
         # --configs-only skips package listing but links still show
         assert "zsh" not in out
@@ -218,7 +219,7 @@ def test_cmd_plan_system_only(tmp_path, state_home, capsys):
         monkeypatches.setattr(cli, "host", lambda: home)
         _fake_pm(monkeypatches, installed=set())
         args = SimpleNamespace(root=None, system_only=True, configs_only=False, prune=False)
-        cli.cmd_plan(args)
+        cli.cmd_diff(args)
         out = capsys.readouterr().out
         # --system-only: packages still show, both sections present
         assert "== system ==" in out
@@ -570,7 +571,7 @@ def test_main_config_error(tmp_path, state_home, capsys):
         monkeypatches.chdir(tmp_path)
         monkeypatches.setattr(linker, "remembered_root", lambda: tmp_path)
         monkeypatches.setattr(linker, "remember_root", lambda p: None)
-        rc = cli.main(["plan"])
+        rc = cli.main(["diff"])
         assert rc == 1
     finally:
         monkeypatches.undo()
