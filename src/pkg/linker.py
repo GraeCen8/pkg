@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
-import re
 import socket
 import string
 import time
@@ -130,57 +130,36 @@ def remembered_root() -> Path | None:
     return Path(value) if value else None
 
 
-def _compile_glob(pattern: str) -> re.Pattern:
-    out: list[str] = []
-    i, n = 0, len(pattern)
-    while i < n:
-        c = pattern[i]
-        if c == "*":
-            if pattern[i : i + 2] == "**":
-                if i + 2 < n and pattern[i + 2] == "/":
-                    out.append("(?:[^/]+/)*")
-                    i += 3
-                    continue
-                out.append(".*")
-                i += 2
-                continue
-            out.append("[^/]*")
-            i += 1
-        elif c == "?":
-            out.append("[^/]")
-            i += 1
-        elif c == "[":
-            j = i + 1
-            if j < n and pattern[j] in "!^":
-                j += 1
-            if j < n:
-                k = j
-                while k < n and pattern[k] != "]":
-                    k += 1
-                if k < n:
-                    inner = pattern[j:k]
-                    if inner.startswith(("!", "^")):
-                        inner = "^" + inner[1:]
-                    out.append("[" + inner + "]")
-                    i = k + 1
-                    continue
-            out.append(re.escape(c))
-            i += 1
-        else:
-            out.append(re.escape(c))
-            i += 1
-    return re.compile("^" + "".join(out) + "$")
-
-
 def _is_ignored(rel: Path, patterns: list[str]) -> bool:
+    """Return True if *rel* matches any of the ignore *patterns*.
+
+    Patterns containing '/' are matched against the full relative path.
+    Patterns without '/' are matched against individual path components.
+    Supports standard glob syntax: *, ?, [...], **.
+    """
     parts = list(rel.parts)
     full = "/".join(parts)
     for raw in patterns:
         is_dir = raw.endswith("/")
         pat = raw.rstrip("/")
-        rx = _compile_glob(pat)
-        if rx.match(full) or any(rx.match(p) for p in parts):
-            return True
+        if "**" in pat:
+            # Handle ** patterns: split on **, use fnmatch on the suffix
+            # e.g., **/*.swp matches foo/bar.swp and x.swp
+            prefix, suffix = pat.split("**", 1)
+            suffix = suffix.lstrip("/")
+            if prefix and not full.startswith(prefix):
+                continue
+            remainder = full[len(prefix) :]
+            if fnmatch.fnmatch(remainder, suffix) or any(
+                fnmatch.fnmatch(p, suffix) for p in remainder.split("/") if p
+            ):
+                return True
+        elif "/" in pat:
+            if fnmatch.fnmatch(full, pat):
+                return True
+        else:
+            if any(fnmatch.fnmatch(p, pat) for p in parts):
+                return True
         if is_dir and (full == pat or full.startswith(pat + "/")):
             return True
     return False

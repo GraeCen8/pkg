@@ -266,6 +266,104 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+def _sync_system(
+    manager: pms_mod.PackageManager,
+    root_dir: Path,
+    force_yes: bool,
+    system_only: bool,
+) -> int:
+    """Install missing system packages. Returns 0 on success."""
+    if system_only:
+        return 0
+    print(out.section("== system =="))
+    pkgs = cfg.all_packages(root_dir, manager.name)
+    missing = manager.check_many(pkgs)
+    if not missing:
+        print(f"  {out.green('all packages present')}")
+        return 0
+    if _consent(force_yes, f"install these package(s)? {out.cyan('[y/N] ')}"):
+        return _system_install(manager, missing)
+    if sys.stdin.isatty():
+        print(out.red("  aborted"))
+        return 1
+    print(err.red("[system] packages missing: rerun with --yes"))
+    return 1
+
+
+def _sync_links(
+    root_dir: Path,
+    home: Path,
+    force: bool,
+    prune: bool,
+    configs_only: bool,
+) -> int:
+    """Apply symlinks and rendered files. Returns 0 on success."""
+    if configs_only:
+        return 0
+    print(out.section("== links =="))
+    items = linker.plan(root_dir, home)
+    problems = linker.find_conflicts(items, home)
+    if problems and not force:
+        print(err.red("conflicts:"))
+        for problem in problems:
+            print(f"  {out.red('-')} {problem}", file=sys.stderr)
+        sys.exit(err.red("aborting; use --force to replace"))
+    try:
+        created = linker.apply(items, home, force=force)
+    except linker.ConflictError as exc:
+        sys.exit(err.red(f"error: {exc}"))
+    for item in created:
+        print(f"  {out.green('+')} {item.target}")
+    if not created:
+        print(out.dim("  all targets already linked"))
+    if problems:
+        print(out.yellow(f"  replaced {len(problems)} existing target(s)"))
+    if prune:
+        removed, notices = linker.prune(items, home)
+        for notice in notices:
+            print(f"  {out.yellow('~')} {notice}")
+        print(f"  {out.green(f'pruned {removed} orphan(s)')}")
+    return 0
+
+
+def _sync_dropped(
+    manager: pms_mod.PackageManager,
+    root_dir: Path,
+    force_yes: bool,
+) -> int:
+    """Review and optionally uninstall dropped packages. Returns 0 on success."""
+    declared = cfg.all_packages(root_dir, manager.name)
+    previously = linker.load_installed()
+    dropped = [pkg for pkg in previously if pkg not in declared]
+    if not dropped:
+        linker.record_installed(declared)
+        return 0
+    print(out.section("== dropped =="))
+    print(out.yellow("  previously declared, now removed from manifest:"))
+    for pkg in dropped:
+        print(f"  {out.red('?')} {pkg}")
+    if _consent(force_yes, f"uninstall these {len(dropped)} package(s)? {out.cyan('[y/N] ')}"):
+        if _system_remove(manager, dropped):
+            return 1
+        linker.record_installed(declared)
+    elif sys.stdin.isatty():
+        print(out.dim("  keeping them installed (no longer tracked)"))
+    return 0
+
+
+def _sync_hooks(roots: list[cfg.Root]) -> int:
+    """Run post-sync hooks. Returns 0 on success."""
+    hooks = [(root, hook) for root in roots for hook in root.post_hooks]
+    if not hooks:
+        return 0
+    print(out.section("== hooks =="))
+    for root, hook in hooks:
+        print(f"  {out.magenta('[hook]')} {hook}")
+        if subprocess.run(["sh", "-c", hook], check=False).returncode != 0:
+            sys.exit(err.red(f"hook failed: {hook}"))
+    return 0
+
+
 def cmd_sync(args: argparse.Namespace) -> int:
     """``pkg sync`` — sync the machine to the manifest.
 
@@ -279,73 +377,13 @@ def cmd_sync(args: argparse.Namespace) -> int:
     if not args.no_git:
         pull_roots(root_dir, roots)
 
-    if not args.configs_only:
-        print(out.section("== system =="))
-        pkgs = cfg.all_packages(root_dir, manager.name)
-        missing = manager.check_many(pkgs)
-        if missing:
-            if _consent(args.yes, f"install these package(s)? {out.cyan('[y/N] ')}"):
-                rc = _system_install(manager, missing)
-            elif sys.stdin.isatty():
-                print(out.red("  aborted"))
-                return 1
-            else:
-                rc = 1
-                print(err.red("[system] packages missing: rerun with --yes"))
-            if rc:
-                return 1
-        else:
-            print(f"  {out.green('all packages present')}")
-
-    if not args.system_only:
-        print(out.section("== links =="))
-        items = linker.plan(root_dir, home)
-        problems = linker.find_conflicts(items, home)
-        if problems and not args.force:
-            print(err.red("conflicts:"))
-            for problem in problems:
-                print(f"  {out.red('-')} {problem}", file=sys.stderr)
-            sys.exit(err.red("aborting; use --force to replace"))
-        try:
-            created = linker.apply(items, home, force=args.force)
-        except linker.ConflictError as exc:
-            sys.exit(err.red(f"error: {exc}"))
-        for item in created:
-            print(f"  {out.green('+')} {item.target}")
-        if not created:
-            print(out.dim("  all targets already linked"))
-        if problems:
-            print(out.yellow(f"  replaced {len(problems)} existing target(s)"))
-        if args.prune:
-            removed, notices = linker.prune(items, home)
-            for notice in notices:
-                print(f"  {out.yellow('~')} {notice}")
-            print(f"  {out.green(f'pruned {removed} orphan(s)')}")
-
-    declared = cfg.all_packages(root_dir, manager.name)
-    previously = linker.load_installed()
-    dropped = [pkg for pkg in previously if pkg not in declared]
-    if dropped:
-        print(out.section("== dropped =="))
-        print(out.yellow("  previously declared, now removed from manifest:"))
-        for pkg in dropped:
-            print(f"  {out.red('?')} {pkg}")
-        if _consent(args.yes, f"uninstall these {len(dropped)} package(s)? {out.cyan('[y/N] ')}"):
-            if _system_remove(manager, dropped):
-                return 1
-            linker.record_installed(declared)
-        elif sys.stdin.isatty():
-            print(out.dim("  keeping them installed (no longer tracked)"))
-    else:
-        linker.record_installed(declared)
-
-    hooks = [(root, hook) for root in roots for hook in root.post_hooks]
-    if hooks:
-        print(out.section("== hooks =="))
-        for root, hook in hooks:
-            print(f"  {out.magenta('[hook]')} {hook}")
-            if subprocess.run(["sh", "-c", hook], check=False).returncode != 0:
-                sys.exit(err.red(f"hook failed: {hook}"))
+    if _sync_system(manager, root_dir, args.yes, args.configs_only):
+        return 1
+    if _sync_links(root_dir, home, args.force, args.prune, args.system_only):
+        return 1
+    if _sync_dropped(manager, root_dir, args.yes):
+        return 1
+    _sync_hooks(roots)
 
     print(out.green(out.bold("in sync")))
     return 0
