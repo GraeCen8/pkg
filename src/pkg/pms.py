@@ -62,7 +62,11 @@ class PackageManager:
     def _run_captured(self, cmd: list[str]) -> tuple[int, str]:
         """Run *cmd*, capturing output. Return (returncode, error_output)."""
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        error = (result.stderr.strip() or result.stdout.strip()) if result.returncode != 0 else ""
+        if result.returncode == 0:
+            return 0, ""
+        error = result.stderr.strip() or result.stdout.strip()
+        if not error:
+            error = f"exit code {result.returncode}"
         return result.returncode, error
 
     def _sudo(self, cmd: list[str]) -> list[str]:
@@ -105,6 +109,7 @@ class Apt(PackageManager):
             self._sudo(["apt-get", "install", "-y", "--no-install-recommends", *still])
         )
         if rc != 0:
+            self._updated = False
             return rc, f"apt-get install failed: {err}"
         return self._verify(still)
 
