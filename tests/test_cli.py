@@ -49,12 +49,12 @@ def _fake_pm(monkeypatch, installed=None):
         def install(self, packages):
             calls.append(("install", packages))
             installed.update(packages)
-            return 0
+            return 0, ""
 
         def remove(self, packages):
             calls.append(("remove", packages))
             installed.difference_update(packages)
-            return 0
+            return 0, ""
 
     monkeypatch.setattr(cli, "get_manager", lambda root_dir: FakePM())
     return installed, calls

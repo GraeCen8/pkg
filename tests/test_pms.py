@@ -6,8 +6,10 @@ PACKAGE = "zsh"
 
 
 class FakeResult:
-    def __init__(self, returncode: int = 0) -> None:
+    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
         self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 def stateful_runner(monkeypatch) -> tuple[list[list[str]], set[str]]:
@@ -23,7 +25,21 @@ def stateful_runner(monkeypatch) -> tuple[list[list[str]], set[str]]:
             installed.add(cmd[-1])
         return FakeResult()
 
+    def fake_captured(self_or_cmd, cmd=None):
+        # Handle both (self, cmd) from instance call and (cmd) from direct call
+        if cmd is None:
+            c = self_or_cmd
+        else:
+            c = cmd
+        calls.append(c)
+        if any(tok in c for tok in _REMOVE_TOKENS):
+            installed.discard(c[-1])
+        elif "update" not in c:
+            installed.add(c[-1])
+        return 0, ""
+
     monkeypatch.setattr(pms.subprocess, "run", fake_run)
+    monkeypatch.setattr(pms.PackageManager, "_run_captured", fake_captured)
     monkeypatch.setattr(pms.shutil, "which", lambda name: None)
     return calls, installed
 
@@ -74,8 +90,8 @@ def test_backend_install_and_remove_shapes(monkeypatch, cls, exe, install_cmd, r
     pm = cls()
     pm.check = lambda p: p in installed
 
-    assert pm.install([PACKAGE]) == 0
-    assert pm.remove([PACKAGE]) == 0
+    assert pm.install([PACKAGE]) == (0, "")
+    assert pm.remove([PACKAGE]) == (0, "")
 
     assert install_cmd in calls
     assert remove_cmd in calls
@@ -86,7 +102,7 @@ def test_apt_lazy_update_then_install(monkeypatch):
     calls, installed = stateful_runner(monkeypatch)
     pm = pms.Apt()
     pm.check = lambda p: p in installed
-    assert pm.install(["fd"]) == 0
+    assert pm.install(["fd"]) == (0, "")
     assert ["sudo", "apt-get", "update"] in calls
     assert ["sudo", "apt-get", "install", "-y", "--no-install-recommends", "fd"] in calls
     assert calls.count(["sudo", "apt-get", "update"]) == 1
@@ -97,7 +113,7 @@ def test_apt_remove_shape(monkeypatch):
     pm = pms.Apt()
     pm.check = lambda p: p in installed
     installed.add("fd")
-    assert pm.remove(["fd"]) == 0
+    assert pm.remove(["fd"]) == (0, "")
     assert ["sudo", "apt-get", "remove", "-y", "fd"] in calls
 
 
@@ -106,9 +122,9 @@ def test_present_packages_short_circuit(monkeypatch):
     pm = pms.Pacman()
     pm.check = lambda p: p in installed
     installed.add(PACKAGE)
-    assert pm.install([PACKAGE]) == 0
+    assert pm.install([PACKAGE]) == (0, "")
     installed.clear()
-    assert pm.remove([PACKAGE]) == 0
+    assert pm.remove([PACKAGE]) == (0, "")
     assert calls == []
 
 
@@ -117,7 +133,7 @@ def test_sudo_skipped_when_root(monkeypatch):
     monkeypatch.setattr(pms.os, "geteuid", lambda: 0)
     pm = pms.Pacman()
     pm.check = lambda p: False
-    assert pm.install([PACKAGE]) == 1
+    assert pm.install([PACKAGE]) == (1, "still missing after install: zsh")
     assert ["pacman", "-S", "--noconfirm", "--needed", PACKAGE] in calls
 
 
@@ -125,7 +141,8 @@ def test_verify_after_failed_install_returns_1(monkeypatch):
     monkeypatch.setattr(pms.subprocess, "run", lambda cmd, **kw: FakeResult(1))
     pm = pms.Pacman()
     pm.check = lambda p: False
-    assert pm.install(["ghost"]) == 1
+    rc, _err = pm.install(["ghost"])
+    assert rc == 1
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +265,8 @@ def test_pacman_uses_yay_when_available(monkeypatch):
     monkeypatch.setattr(pms.shutil, "which", lambda name: "/usr/bin/yay" if name == "yay" else None)
     pm = pms.Pacman()
     pm.check = lambda p: p in installed
-    assert pm.install([PACKAGE]) == 0
-    assert ["sudo", "yay", "-S", "--noconfirm", "--needed", PACKAGE] in calls
+    assert pm.install([PACKAGE]) == (0, "")
+    assert ["yay", "-S", "--noconfirm", "--needed", PACKAGE] in calls
 
 
 def test_pacman_falls_back_to_pacman(monkeypatch):
@@ -257,8 +274,34 @@ def test_pacman_falls_back_to_pacman(monkeypatch):
     monkeypatch.setattr(pms.shutil, "which", lambda name: None)
     pm = pms.Pacman()
     pm.check = lambda p: p in installed
-    assert pm.install([PACKAGE]) == 0
+    assert pm.install([PACKAGE]) == (0, "")
     assert ["sudo", "pacman", "-S", "--noconfirm", "--needed", PACKAGE] in calls
+
+
+def test_pacman_yay_no_sudo(monkeypatch):
+    """yay/paru handle sudo internally; wrapping in sudo causes nested prompt failures."""
+    calls, installed = stateful_runner(monkeypatch)
+    monkeypatch.setattr(pms.shutil, "which", lambda name: "/usr/bin/yay" if name == "yay" else None)
+    pm = pms.Pacman()
+    pm.check = lambda p: p in installed
+    pm.install([PACKAGE])
+    # yay should be called directly, not under sudo
+    yay_calls = [c for c in calls if "yay" in c]
+    assert all("sudo" not in c for c in yay_calls), f"yay should not use sudo: {yay_calls}"
+
+
+def test_pacman_install_returns_error_on_failure(monkeypatch):
+    """install() should return the error output from the package manager."""
+
+    def fake_captured(self, cmd):
+        return 1, "error: failed to prepare transaction (could not satisfy dependencies)"
+
+    monkeypatch.setattr(pms.PackageManager, "_run_captured", fake_captured)
+    pm = pms.Pacman()
+    pm.check = lambda p: False
+    rc, err = pm.install(["nonexistent-pkg"])
+    assert rc == 1
+    assert "could not satisfy dependencies" in err
 
 
 # ---------------------------------------------------------------------------

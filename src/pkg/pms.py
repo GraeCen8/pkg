@@ -29,12 +29,12 @@ class PackageManager:
         """Return the subset of *packages* that are not currently installed."""
         return [p for p in packages if not self.check(p)]
 
-    def install(self, packages: list[str]) -> int:
-        """Install *packages*.  Return 0 on success, non-zero on failure."""
+    def install(self, packages: list[str]) -> tuple[int, str]:
+        """Install *packages*.  Return (0, "") on success, (non-zero, error_msg) on failure."""
         raise NotImplementedError
 
-    def remove(self, packages: list[str]) -> int:
-        """Remove *packages*.  Return 0 on success, non-zero on failure."""
+    def remove(self, packages: list[str]) -> tuple[int, str]:
+        """Remove *packages*.  Return (0, "") on success, (non-zero, error_msg) on failure."""
         raise NotImplementedError
 
     def _quiet(self, *cmd: str) -> bool:
@@ -59,16 +59,24 @@ class PackageManager:
             list(cmd), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
         ).returncode
 
+    def _run_captured(self, cmd: list[str]) -> tuple[int, str]:
+        """Run *cmd*, capturing output. Return (returncode, error_output)."""
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        error = (result.stderr.strip() or result.stdout.strip()) if result.returncode != 0 else ""
+        return result.returncode, error
+
     def _sudo(self, cmd: list[str]) -> list[str]:
         """Prepend ``sudo`` to *cmd* unless already running as root."""
         if os.geteuid() == 0:
             return cmd
         return ["sudo", *cmd]
 
-    def _verify(self, missing: list[str]) -> int:
-        """Re-check that *missing* packages are now installed.  Return 0 if all present."""
+    def _verify(self, missing: list[str]) -> tuple[int, str]:
+        """Re-check that *missing* packages are now installed.  Return (0, "") if all present."""
         remaining = self.check_many(missing)
-        return 1 if remaining else 0
+        if remaining:
+            return 1, f"still missing after install: {', '.join(remaining)}"
+        return 0, ""
 
 
 class Apt(PackageManager):
@@ -83,31 +91,34 @@ class Apt(PackageManager):
     def check(self, package: str) -> bool:
         return self._quiet("dpkg", "-s", package)
 
-    def install(self, packages: list[str]) -> int:
+    def install(self, packages: list[str]) -> tuple[int, str]:
         missing = self.check_many(packages)
         if not missing:
-            return 0
+            return 0, ""
         if not self._updated:
-            if self._run_silent(self._sudo(["apt-get", "update"])) != 0:
-                return 1
+            rc, err = self._run_captured(self._sudo(["apt-get", "update"]))
+            if rc != 0:
+                return rc, f"apt-get update failed: {err}"
             self._updated = True
         still = self.check_many(missing)
-        if (
-            self._run_silent(
-                self._sudo(["apt-get", "install", "-y", "--no-install-recommends", *still])
-            )
-            != 0
-        ):
-            return 1
+        rc, err = self._run_captured(
+            self._sudo(["apt-get", "install", "-y", "--no-install-recommends", *still])
+        )
+        if rc != 0:
+            return rc, f"apt-get install failed: {err}"
         return self._verify(still)
 
-    def remove(self, packages: list[str]) -> int:
+    def remove(self, packages: list[str]) -> tuple[int, str]:
         present = [p for p in packages if self.check(p)]
         if not present:
-            return 0
-        if self._run_silent(self._sudo(["apt-get", "remove", "-y", *present])) != 0:
-            return 1
-        return 1 if [p for p in present if self.check(p)] else 0
+            return 0, ""
+        rc, err = self._run_captured(self._sudo(["apt-get", "remove", "-y", *present]))
+        if rc != 0:
+            return rc, f"apt-get remove failed: {err}"
+        remaining = [p for p in present if self.check(p)]
+        if remaining:
+            return 1, f"could not remove: {', '.join(remaining)}"
+        return 0, ""
 
 
 class Pacman(PackageManager):
@@ -119,27 +130,53 @@ class Pacman(PackageManager):
     def _bin(self) -> str:
         return "yay" if shutil.which("yay") else "pacman"
 
+    def _is_aur_helper(self) -> bool:
+        """Return True if an AUR helper (yay/paru) is available."""
+        return shutil.which("yay") is not None or shutil.which("paru") is not None
+
     def check(self, package: str) -> bool:
         return self._quiet(self._bin(), "-Q", package)
 
-    def install(self, packages: list[str]) -> int:
+    def install(self, packages: list[str]) -> tuple[int, str]:
         missing = self.check_many(packages)
         if not missing:
-            return 0
-        if (
-            self._run_silent(self._sudo([self._bin(), "-S", "--noconfirm", "--needed", *missing]))
-            != 0
-        ):
-            return 1
+            return 0, ""
+
+        bin_name = self._bin()
+
+        if self._is_aur_helper():
+            # AUR helpers handle sudo internally; wrapping in sudo
+            # causes nested sudo prompts that fail without a terminal.
+            cmd = [bin_name, "-S", "--noconfirm", "--needed", *missing]
+        else:
+            cmd = self._sudo([bin_name, "-S", "--noconfirm", "--needed", *missing])
+
+        rc, error = self._run_captured(cmd)
+        if rc != 0:
+            return rc, error
+
         return self._verify(missing)
 
-    def remove(self, packages: list[str]) -> int:
+    def remove(self, packages: list[str]) -> tuple[int, str]:
         present = [p for p in packages if self.check(p)]
         if not present:
-            return 0
-        if self._run_silent(self._sudo([self._bin(), "-Rns", "--noconfirm", *present])) != 0:
-            return 1
-        return 1 if [p for p in present if self.check(p)] else 0
+            return 0, ""
+
+        bin_name = self._bin()
+
+        if self._is_aur_helper():
+            cmd = [bin_name, "-Rns", "--noconfirm", *present]
+        else:
+            cmd = self._sudo([bin_name, "-Rns", "--noconfirm", *present])
+
+        rc, error = self._run_captured(cmd)
+        if rc != 0:
+            return rc, error
+
+        remaining = [p for p in present if self.check(p)]
+        if remaining:
+            return 1, f"could not remove: {', '.join(remaining)}"
+        return 0, ""
 
 
 class Dnf(PackageManager):
@@ -151,21 +188,26 @@ class Dnf(PackageManager):
     def check(self, package: str) -> bool:
         return self._quiet("rpm", "-q", package)
 
-    def install(self, packages: list[str]) -> int:
+    def install(self, packages: list[str]) -> tuple[int, str]:
         missing = self.check_many(packages)
         if not missing:
-            return 0
-        if self._run_silent(self._sudo(["dnf", "install", "-y", *missing])) != 0:
-            return 1
+            return 0, ""
+        rc, error = self._run_captured(self._sudo(["dnf", "install", "-y", *missing]))
+        if rc != 0:
+            return rc, error
         return self._verify(missing)
 
-    def remove(self, packages: list[str]) -> int:
+    def remove(self, packages: list[str]) -> tuple[int, str]:
         present = [p for p in packages if self.check(p)]
         if not present:
-            return 0
-        if self._run_silent(self._sudo(["dnf", "remove", "-y", *present])) != 0:
-            return 1
-        return 1 if [p for p in present if self.check(p)] else 0
+            return 0, ""
+        rc, error = self._run_captured(self._sudo(["dnf", "remove", "-y", *present]))
+        if rc != 0:
+            return rc, error
+        remaining = [p for p in present if self.check(p)]
+        if remaining:
+            return 1, f"could not remove: {', '.join(remaining)}"
+        return 0, ""
 
 
 class Zypper(PackageManager):
@@ -177,22 +219,29 @@ class Zypper(PackageManager):
     def check(self, package: str) -> bool:
         return self._quiet("rpm", "-q", package)
 
-    def install(self, packages: list[str]) -> int:
+    def install(self, packages: list[str]) -> tuple[int, str]:
         missing = self.check_many(packages)
         if not missing:
-            return 0
-        if self._run_silent(self._sudo(["zypper", "--non-interactive", "install", *missing])) != 0:
-            return 1
+            return 0, ""
+        rc, error = self._run_captured(
+            self._sudo(["zypper", "--non-interactive", "install", *missing])
+        )
+        if rc != 0:
+            return rc, error
         return self._verify(missing)
 
-    def remove(self, packages: list[str]) -> int:
+    def remove(self, packages: list[str]) -> tuple[int, str]:
         present = [p for p in packages if self.check(p)]
         if not present:
-            return 0
+            return 0, ""
         cmd = self._sudo(["zypper", "--non-interactive", "remove", "-y", *present])
-        if self._run_silent(cmd) != 0:
-            return 1
-        return 1 if [p for p in present if self.check(p)] else 0
+        rc, error = self._run_captured(cmd)
+        if rc != 0:
+            return rc, error
+        remaining = [p for p in present if self.check(p)]
+        if remaining:
+            return 1, f"could not remove: {', '.join(remaining)}"
+        return 0, ""
 
 
 class Apk(PackageManager):
@@ -204,21 +253,26 @@ class Apk(PackageManager):
     def check(self, package: str) -> bool:
         return self._quiet("apk", "info", "-e", package)
 
-    def install(self, packages: list[str]) -> int:
+    def install(self, packages: list[str]) -> tuple[int, str]:
         missing = self.check_many(packages)
         if not missing:
-            return 0
-        if self._run_silent(self._sudo(["apk", "add", "--no-interactive", *missing])) != 0:
-            return 1
+            return 0, ""
+        rc, error = self._run_captured(self._sudo(["apk", "add", "--no-interactive", *missing]))
+        if rc != 0:
+            return rc, error
         return self._verify(missing)
 
-    def remove(self, packages: list[str]) -> int:
+    def remove(self, packages: list[str]) -> tuple[int, str]:
         present = [p for p in packages if self.check(p)]
         if not present:
-            return 0
-        if self._run_silent(["apk", "del", "--no-interactive", *present]) != 0:
-            return 1
-        return 1 if [p for p in present if self.check(p)] else 0
+            return 0, ""
+        rc, error = self._run_captured(["apk", "del", "--no-interactive", *present])
+        if rc != 0:
+            return rc, error
+        remaining = [p for p in present if self.check(p)]
+        if remaining:
+            return 1, f"could not remove: {', '.join(remaining)}"
+        return 0, ""
 
 
 def _brew() -> str | None:
@@ -247,21 +301,26 @@ class Brew(PackageManager):
     def check(self, package: str) -> bool:
         return self._quiet(self._brew, "list", "--formula", package)
 
-    def install(self, packages: list[str]) -> int:
+    def install(self, packages: list[str]) -> tuple[int, str]:
         missing = self.check_many(packages)
         if not missing:
-            return 0
-        if self._run_silent([self._brew, "install", *missing]) != 0:
-            return 1
+            return 0, ""
+        rc, error = self._run_captured([self._brew, "install", *missing])
+        if rc != 0:
+            return rc, error
         return self._verify(missing)
 
-    def remove(self, packages: list[str]) -> int:
+    def remove(self, packages: list[str]) -> tuple[int, str]:
         present = [p for p in packages if self.check(p)]
         if not present:
-            return 0
-        if self._run_silent([self._brew, "uninstall", *present]) != 0:
-            return 1
-        return 1 if [p for p in present if self.check(p)] else 0
+            return 0, ""
+        rc, error = self._run_captured([self._brew, "uninstall", *present])
+        if rc != 0:
+            return rc, error
+        remaining = [p for p in present if self.check(p)]
+        if remaining:
+            return 1, f"could not remove: {', '.join(remaining)}"
+        return 0, ""
 
 
 _REGISTRY = (Pacman, Apt, Dnf, Zypper, Apk, Brew)

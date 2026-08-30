@@ -207,9 +207,12 @@ def _consent(force_yes: bool, prompt: str) -> bool:
 def _system_install(manager: pms_mod.PackageManager, missing: list[str]) -> int:
     rc = 0
     for pkg in missing:
-        rci = _spinner_run("installing", [pkg], lambda p=pkg: manager.install([p]))
+        rci, err = _spinner_run("installing", [pkg], lambda p=pkg: manager.install([p]))
         if rci:
             print(f"    {out.red('error')}: {pkg}")
+            if err:
+                for line in err.splitlines()[:5]:
+                    print(f"      {line}")
             rc = rci
         else:
             print(f"  {out.green(chr(0x2713))} {pkg}")
@@ -217,13 +220,16 @@ def _system_install(manager: pms_mod.PackageManager, missing: list[str]) -> int:
 
 
 def _system_remove(manager: pms_mod.PackageManager, packages: list[str]) -> int:
-    rc = _spinner_run("removing", packages, lambda: manager.remove(packages))
+    rc, err = _spinner_run("removing", packages, lambda: manager.remove(packages))
     if rc:
         still = [p for p in packages if manager.check(p)]
         if still:
             print(f"  {out.red('error')}: could not remove: {', '.join(still)}")
         else:
             print(out.red("  error: removal failed"))
+        if err:
+            for line in err.splitlines()[:5]:
+                print(f"    {line}")
         return rc
     print(f"  {out.green('ok')} — removed {len(packages)} package(s)")
     return 0
