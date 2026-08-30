@@ -37,6 +37,18 @@ class PackageManager:
         """Remove *packages*.  Return (0, "") on success, (non-zero, error_msg) on failure."""
         raise NotImplementedError
 
+    def list_available(self) -> list[str]:
+        """Return a list of all available packages from the system PM."""
+        raise NotImplementedError
+
+    def list_installed(self) -> list[str]:
+        """Return a list of all installed packages."""
+        raise NotImplementedError
+
+    def print_info(self, package: str) -> str:
+        """Return formatted, colored info for *package*."""
+        raise NotImplementedError
+
     def _quiet(self, *cmd: str) -> bool:
         """Run *cmd* silently, returning True if it exits 0."""
         return (
@@ -125,6 +137,42 @@ class Apt(PackageManager):
             return 1, f"could not remove: {', '.join(remaining)}"
         return 0, ""
 
+    def list_available(self) -> list[str]:
+        if not self._updated:
+            self._run_captured(self._sudo(["apt-get", "update"]))
+            self._updated = True
+        result = subprocess.run(
+            ["apt-cache", "search", "."],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [line.split()[0] for line in result.stdout.splitlines() if line.strip()]
+
+    def list_installed(self) -> list[str]:
+        result = subprocess.run(
+            ["dpkg", "--get-selections"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [line.split()[0] for line in result.stdout.splitlines() if "\tinstall" in line]
+
+    def print_info(self, package: str) -> str:
+        result = subprocess.run(
+            ["apt-cache", "show", package],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return f"Package '{package}' not found."
+        return result.stdout
+
 
 class Pacman(PackageManager):
     """Arch Linux ``pacman`` backend; automatically uses ``yay`` or ``paru`` if available for AUR support."""
@@ -183,6 +231,42 @@ class Pacman(PackageManager):
             return 1, f"could not remove: {', '.join(remaining)}"
         return 0, ""
 
+    def list_available(self) -> list[str]:
+        bin_name = self._bin()
+        result = subprocess.run(
+            [bin_name, "-Slq"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def list_installed(self) -> list[str]:
+        bin_name = self._bin()
+        result = subprocess.run(
+            [bin_name, "-Qq"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def print_info(self, package: str) -> str:
+        bin_name = self._bin()
+        result = subprocess.run(
+            [bin_name, "-Si", package],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return f"Package '{package}' not found."
+        return result.stdout
+
 
 class Dnf(PackageManager):
     """Fedora/RHEL ``dnf`` backend."""
@@ -213,6 +297,41 @@ class Dnf(PackageManager):
         if remaining:
             return 1, f"could not remove: {', '.join(remaining)}"
         return 0, ""
+
+    def list_available(self) -> list[str]:
+        result = subprocess.run(
+            ["dnf", "list", "available", "--quiet"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        lines = result.stdout.splitlines()[2:]  # skip header
+        return [line.split()[0].rsplit(".", 1)[0] for line in lines if line.strip()]
+
+    def list_installed(self) -> list[str]:
+        result = subprocess.run(
+            ["dnf", "list", "installed", "--quiet"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        lines = result.stdout.splitlines()[2:]  # skip header
+        return [line.split()[0].rsplit(".", 1)[0] for line in lines if line.strip()]
+
+    def print_info(self, package: str) -> str:
+        result = subprocess.run(
+            ["dnf", "info", package],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return f"Package '{package}' not found."
+        return result.stdout
 
 
 class Zypper(PackageManager):
@@ -248,6 +367,53 @@ class Zypper(PackageManager):
             return 1, f"could not remove: {', '.join(remaining)}"
         return 0, ""
 
+    def list_available(self) -> list[str]:
+        result = subprocess.run(
+            ["zypper", "--non-interactive", "search", "-i"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        packages = []
+        for line in result.stdout.splitlines():
+            if line.startswith(("v ", "i ")):
+                parts = line.split("|")
+                if len(parts) >= 2:
+                    packages.append(parts[1].strip())
+        return packages
+
+    def list_installed(self) -> list[str]:
+        result = subprocess.run(
+            ["zypper", "--non-interactive", "packages", "-i"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        packages = []
+        for line in result.stdout.splitlines():
+            if "|" in line and not line.startswith("---"):
+                parts = line.split("|")
+                if len(parts) >= 2:
+                    name = parts[1].strip()
+                    if name and name != "Name":
+                        packages.append(name)
+        return packages
+
+    def print_info(self, package: str) -> str:
+        result = subprocess.run(
+            ["zypper", "--non-interactive", "info", package],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return f"Package '{package}' not found."
+        return result.stdout
+
 
 class Apk(PackageManager):
     """Alpine ``apk`` backend."""
@@ -278,6 +444,47 @@ class Apk(PackageManager):
         if remaining:
             return 1, f"could not remove: {', '.join(remaining)}"
         return 0, ""
+
+    def list_available(self) -> list[str]:
+        result = subprocess.run(
+            ["apk", "search"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def list_installed(self) -> list[str]:
+        result = subprocess.run(
+            ["apk", "list", "--installed"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        packages = []
+        for line in result.stdout.splitlines():
+            if line.strip():
+                parts = line.split()
+                if parts:
+                    # Strip version suffix like -1.2.3-r0
+                    name = parts[0].rsplit("-", 2)[0] if len(parts) > 1 else parts[0]
+                    packages.append(name)
+        return packages
+
+    def print_info(self, package: str) -> str:
+        result = subprocess.run(
+            ["apk", "info", package],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return f"Package '{package}' not found."
+        return result.stdout
 
 
 def _brew() -> str | None:
@@ -345,6 +552,39 @@ class Brew(PackageManager):
             return 1, f"could not remove: {', '.join(remaining)}"
         return 0, ""
 
+    def list_available(self) -> list[str]:
+        result = subprocess.run(
+            [self._brew, "search"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def list_installed(self) -> list[str]:
+        result = subprocess.run(
+            [self._brew, "list", "--formula"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def print_info(self, package: str) -> str:
+        result = subprocess.run(
+            [self._brew, "info", package],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return f"Package '{package}' not found."
+        return result.stdout
+
 
 class Flatpak(PackageManager):
     """Flatpak backend for universal Linux packages."""
@@ -375,6 +615,39 @@ class Flatpak(PackageManager):
         if remaining:
             return 1, f"could not remove: {', '.join(remaining)}"
         return 0, ""
+
+    def list_available(self) -> list[str]:
+        result = subprocess.run(
+            ["flatpak", "search", "--columns=application"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def list_installed(self) -> list[str]:
+        result = subprocess.run(
+            ["flatpak", "list", "--app", "--columns=application"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def print_info(self, package: str) -> str:
+        result = subprocess.run(
+            ["flatpak", "info", package],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return f"Package '{package}' not found."
+        return result.stdout
 
 
 _REGISTRY = (Pacman, Apt, Dnf, Zypper, Apk, Brew, Flatpak)

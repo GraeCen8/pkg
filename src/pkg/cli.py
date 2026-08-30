@@ -91,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("target", help="dir to scaffold, e.g. ~/dots or .")
     i.add_argument("--force", action="store_true")
 
+    sr = sub.add_parser("search", help="interactive package search and install")
+    sr.add_argument("query", nargs="?", default="", help="pre-filter search query")
+    sr.add_argument("--installed", action="store_true", help="search installed packages")
+    sr.add_argument("--manager", default=None, help="force a specific package manager")
+
     for name, sp in sub.choices.items():
         if name in ("plan",):
             continue
@@ -572,6 +577,76 @@ def cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_search(args: argparse.Namespace) -> int:
+    """``pkg search`` — interactive package search with add/remove/print actions."""
+    from pkg import search
+
+    manager = pms_mod.detect(args.manager)
+
+    # Get package list
+    if args.installed:
+        packages = manager.list_installed()
+    else:
+        packages = manager.list_available()
+
+    if not packages:
+        print(err.red("No packages found."))
+        return 1
+
+    # Preview function for fzf/curses
+    def preview_fn(pkg_name: str) -> str:
+        return manager.print_info(pkg_name)
+
+    # Run search
+    if search._has_fzf():
+        # Fzf search with preview
+        result = search.fzf_search(
+            packages,
+            query=args.query,
+            preview_cmd="",
+        )
+    else:
+        # Fallback to curses
+        result = search.fallback_search(
+            packages,
+            query=args.query,
+            preview_fn=preview_fn,
+        )
+
+    if not result:
+        return 0
+
+    # Parse result: "action:package" or just package name
+    if ":" in result:
+        action, pkg_name = result.split(":", 1)
+    else:
+        # Selected from fzf, now show action menu
+        menu_result = search.action_menu(result, preview_fn=preview_fn)
+        if not menu_result:
+            return 0
+        action, pkg_name = menu_result.split(":", 1)
+
+    # Execute action
+    if action == "add":
+        print(f"Installing {out.green(pkg_name)}...")
+        rc, err_msg = manager.install([pkg_name])
+        if rc:
+            print(err.red(f"Failed to install {pkg_name}: {err_msg}"))
+            return 1
+        print(f"  {out.green(chr(0x2713))} {pkg_name} installed")
+    elif action == "remove":
+        print(f"Removing {out.red(pkg_name)}...")
+        rc, err_msg = manager.remove([pkg_name])
+        if rc:
+            print(err.red(f"Failed to remove {pkg_name}: {err_msg}"))
+            return 1
+        print(f"  {out.red(chr(0x2717))} {pkg_name} removed")
+    elif action == "print":
+        print(manager.print_info(pkg_name))
+
+    return 0
+
+
 _CMD = {
     "diff": cmd_diff,
     "plan": cmd_diff,
@@ -582,6 +657,7 @@ _CMD = {
     "init": cmd_init,
     "add": cmd_add,
     "remove": cmd_remove,
+    "search": cmd_search,
 }
 
 
