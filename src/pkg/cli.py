@@ -591,7 +591,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             manifest_pkgs = cfg.all_packages(root_dir, manager.name)
             # Filter to only packages that are actually installed
             packages = [p for p in manifest_pkgs if manager.check(p)]
-        except Exception:
+        except cfg.ConfigError:
             # Fallback: show all installed packages
             packages = manager.list_installed()
     else:

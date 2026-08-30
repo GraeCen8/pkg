@@ -18,6 +18,8 @@ Backlog and roadmap for `pkg`. Roughly priority-ordered; checked items are done.
 - [x] **Better error messages** — install/remove show actual PM output on failure.
 - [x] **pkg diff** — renamed from `plan` for clarity.
 - [x] **CI-friendly spinner** — shows ok/failed instead of disappearing.
+- [x] **pkg search** — interactive package browser with fzf/curses fallback.
+      Shows preview, action menu (add/remove/print).
 
 ## v0.x
 

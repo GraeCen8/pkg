@@ -6,6 +6,7 @@ pkg manages system packages and application configs with ease using a minimal de
 - **Smart mapping:** Switch between whole-dir, file-level (GNU Stow compatible), or templated configs out of the box.
 - **Real modules:** Nestable repo structure with per-OS/profile rules—supporting all your machines in one place.
 - **Safety first:** Built-in idempotence, conflict detection, and dry-run planning.
+- **Interactive search:** Browse and install packages with fzf (or curses fallback).
 
 ## Quick start
 
@@ -15,6 +16,7 @@ pkg init ~/dots      # Scaffold a new root
 pkg add nvim     # Add packages
 mv ~/.config/nvim ~/dots/configs/nvim    # Add configs
 pkg sync             # Sync everything
+pkg search           # Browse available packages
 ```
 
 ## Documentation

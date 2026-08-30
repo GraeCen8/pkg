@@ -51,7 +51,7 @@ post = ["chsh -s $(which zsh)"]
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `name` | string | Force a specific package manager (`apt`, `pacman`, `dnf`, `zypper`, `apk`, `brew`). Auto-detected if omitted. Only valid in the top root. |
+| `name` | string | Force a specific package manager (`apt`, `pacman`, `dnf`, `zypper`, `apk`, `brew`, `flatpak`). Auto-detected if omitted. Only valid in the top root. |
 
 ### `[config]`
 

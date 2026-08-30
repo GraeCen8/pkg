@@ -10,12 +10,18 @@ A sample workflow:
    ```sh
    pkg add zsh git nvim
    ```
-3. Add configs:
+3. Browse available packages:
+   ```sh
+   pkg search              # interactive browser
+   pkg search neovim       # pre-filtered search
+   pkg search --installed  # show only manifest packages
+   ```
+4. Add configs:
    ```sh
    mv ~/.config/zsh ~/dots/configs/zsh
    mv ~/.config/nvim ~/dots/configs/nvim
    ```
-4. Sync everything:
+5. Sync everything:
    ```sh
    pkg sync
    ```
