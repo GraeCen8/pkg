@@ -9,5 +9,5 @@ mode = "pkg"
 # stow = []
 
 [[system]]
-packages = ["bat", "ripgrep"]
+packages = ["bat", "lua-language-server", "ripgrep"]
 # modules = []

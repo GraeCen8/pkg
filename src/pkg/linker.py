@@ -339,11 +339,6 @@ def _move_to_backup(target: Path, backup_dir: Path) -> Path:
 
 
 def _force_replace(target: Path, backup_dir: Path) -> None:
-    if target.is_dir() and not target.is_symlink():
-        if any(target.iterdir()):
-            raise ConflictError(f"{target}: --force cannot replace a non-empty directory")
-        target.rmdir()
-        return
     _move_to_backup(target, backup_dir)
 
 

@@ -246,7 +246,7 @@ def test_force_replaces_and_backs_up(tmp_path, state_home):
     assert any(backup.iterdir())  # the replaced file was backed up
 
 
-def test_force_refuses_nonempty_dir(tmp_path):
+def test_force_replaces_nonempty_dir(tmp_path):
     root = make_root(
         tmp_path,
         '[config]\nstow = ["zsh"]\n',
@@ -255,9 +255,13 @@ def test_force_refuses_nonempty_dir(tmp_path):
     home = tmp_path / "home"
     (home / ".config").mkdir(parents=True)
     (home / ".config" / "keep").write_text("mine")
-    with pytest.raises(linker.ConflictError, match="non-empty"):
-        linker.apply(linker.plan(root, home), home, force=True)
-    assert (home / ".config" / "keep").read_text() == "mine"
+    linker.apply(linker.plan(root, home), home, force=True)
+    assert (home / ".config").is_symlink()
+    assert (home / ".config").readlink() == root / "configs" / "zsh" / ".config"
+    assert (home / "keep").read_text() == "y"
+    backup = linker.state_dir() / "backup"
+    assert backup.is_dir()
+    assert any(f.name.startswith(".config") for f in backup.iterdir())
 
 
 GV = [
