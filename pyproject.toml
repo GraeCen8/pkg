@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
 ]
-dependencies = []
+dependencies = ["argcomplete>=3.0"]
 
 [project.urls]
 Homepage = "https://github.com/graecen8/pkg"

@@ -52,6 +52,7 @@ pip install -e "."
 rm -rf .stage
 mkdir -p .stage
 cp -r src/pkg .stage/pkg
+cp -r "$(python3 -c "import argcomplete, pathlib; print(pathlib.Path(argcomplete.__file__).parent)")" .stage/argcomplete
 printf 'from pkg.cli import main\nraise SystemExit(main())\n' > .stage/__main__.py
 .venv/bin/python -m zipapp .stage -o ./pkg -p '/usr/bin/env python3'
 rm -rf .stage

@@ -9,10 +9,34 @@ import threading
 import time
 from pathlib import Path
 
+import argcomplete
+
 from pkg import __version__, colors, linker
 from pkg import config as cfg
 from pkg import pms as pms_mod
 from pkg.colors import err, out
+
+
+def _complete_add_packages(ctx, parsed_args, **kwargs):
+    """Complete package names for ``pkg add`` — available but not installed."""
+    try:
+        root_dir = find_root(getattr(parsed_args, "root", None))
+        manager = get_manager(root_dir)
+        available = set(manager.list_available())
+        declared = set(cfg.all_packages(root_dir, manager.name))
+        return sorted(available - declared)
+    except (cfg.ConfigError, OSError, SystemExit):
+        return []
+
+
+def _complete_remove_packages(ctx, parsed_args, **kwargs):
+    """Complete package names for ``pkg remove`` — packages declared in the manifest."""
+    try:
+        root_dir = find_root(getattr(parsed_args, "root", None))
+        manager = get_manager(root_dir)
+        return sorted(cfg.all_packages(root_dir, manager.name))
+    except (cfg.ConfigError, OSError, SystemExit):
+        return []
 
 TEMPLATE = """[config]
 mode = "pkg"
@@ -96,8 +120,21 @@ def build_parser() -> argparse.ArgumentParser:
     sr.add_argument("--installed", action="store_true", help="search installed packages")
     sr.add_argument("--manager", default=None, help="force a specific package manager")
 
+    comp = sub.add_parser("completions", help="generate shell completion scripts")
+    comp.add_argument(
+        "--shell",
+        choices=["bash", "zsh", "fish"],
+        default=None,
+        help="shell to generate for (auto-detected if omitted)",
+    )
+    comp.add_argument(
+        "--install",
+        action="store_true",
+        help="install script to the standard location instead of printing it",
+    )
+
     for name, sp in sub.choices.items():
-        if name in ("plan",):
+        if name in ("plan", "completions"):
             continue
         sp.add_argument(
             "-R",
@@ -105,6 +142,14 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="root dir (overrides the remembered root)",
         )
+
+    for action in sub.choices["add"]._actions:
+        if hasattr(action, "dest") and action.dest == "packages":
+            action.completer = _complete_add_packages
+    for action in sub.choices["remove"]._actions:
+        if hasattr(action, "dest") and action.dest == "packages":
+            action.completer = _complete_remove_packages
+
     return parser
 
 
@@ -670,6 +715,167 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+_BASH_COMPLETION = """\
+_pkg_completions() {
+    local IFS=$'\\n'
+    COMPREPLY=($(COMP_LINE="$COMP_LINE" COMP_POINT="$COMP_POINT" \\
+        _ARGCOMPLETE=1 _ARGCOMPLETE_BASH=1 pkg 2>/dev/null))
+}
+complete -o default -F _pkg_completions pkg
+"""
+
+_ZSH_COMPLETION = """\
+#compdef pkg
+
+_pkg() {
+    autoload -U bashcompinit
+    bashcompinit
+    eval "$(register-python-argcomplete pkg)"
+}
+
+if [[ "$(basename -- ${(%):-%x})" != "_pkg" ]]; then
+    _pkg "$@"
+fi
+"""
+
+_FISH_COMPLETION = """\
+# Fish completion for pkg
+# Install to ~/.config/fish/completions/pkg.fish
+
+function __pkg_needs_command
+    set cmd (commandline -opc)
+    test (count $cmd) -eq 1
+end
+
+function __pkg_using_command
+    set cmd (commandline -opc)
+    test (count $cmd) -ge 2; and test "$argv[1]" = "$cmd[2]"
+end
+
+function __pkg_installed_packages
+    pkg status --system-only 2>/dev/null | grep 'installed' | awk '{print $2}'
+end
+
+function __pkg_manifest_packages
+    pkg status --system-only 2>/dev/null | awk '{print $2}'
+end
+
+function __pkg_configs
+    set root (pkg diff --configs-only 2>/dev/null | head -1 | string match -r 'root: (.+)' | tail -1)
+    if test -n "$root"; and test -d "$root/configs"
+        ls "$root/configs" 2>/dev/null
+    end
+end
+
+# Disable file completions by default
+complete -c pkg -f
+
+# Subcommands
+complete -c pkg -n __pkg_needs_command -a diff -d 'Show what would change'
+complete -c pkg -n __pkg_needs_command -a plan -d 'Show what would change'
+complete -c pkg -n __pkg_needs_command -a sync -d 'Sync machine to manifest'
+complete -c pkg -n __pkg_needs_command -a status -d 'Show package and link state'
+complete -c pkg -n __pkg_needs_command -a unlink -d 'Remove symlinks pkg created'
+complete -c pkg -n __pkg_needs_command -a watch -d 'Re-sync on file changes'
+complete -c pkg -n __pkg_needs_command -a add -d 'Install and declare packages'
+complete -c pkg -n __pkg_needs_command -a remove -d 'Uninstall and undeclare packages'
+complete -c pkg -n __pkg_needs_command -a init -d 'Scaffold a new root directory'
+complete -c pkg -n __pkg_needs_command -a search -d 'Interactive package search'
+complete -c pkg -n __pkg_needs_command -a completions -d 'Generate shell completions'
+
+# Global flags
+complete -c pkg -l version -d 'Show version'
+complete -c pkg -s R -l root -r -d 'Root directory'
+
+# diff/plan flags
+complete -c pkg -n '__pkg_using_command diff' -l system-only
+complete -c pkg -n '__pkg_using_command diff' -l configs-only
+complete -c pkg -n '__pkg_using_command diff' -l prune
+complete -c pkg -n '__pkg_using_command plan' -l system-only
+complete -c pkg -n '__pkg_using_command plan' -l configs-only
+complete -c pkg -n '__pkg_using_command plan' -l prune
+
+# sync flags
+complete -c pkg -n '__pkg_using_command sync' -s y -l yes
+complete -c pkg -n '__pkg_using_command sync' -l system-only
+complete -c pkg -n '__pkg_using_command sync' -l configs-only
+complete -c pkg -n '__pkg_using_command sync' -l force
+complete -c pkg -n '__pkg_using_command sync' -l no-git
+complete -c pkg -n '__pkg_using_command sync' -l prune
+
+# watch flags
+complete -c pkg -n '__pkg_using_command watch' -s y -l yes
+complete -c pkg -n '__pkg_using_command watch' -l interval -r
+complete -c pkg -n '__pkg_using_command watch' -l force
+complete -c pkg -n '__pkg_using_command watch' -l no-git
+
+# search flags
+complete -c pkg -n '__pkg_using_command search' -l installed
+complete -c pkg -n '__pkg_using_command search' -l manager -r
+
+# init flags
+complete -c pkg -n '__pkg_using_command init' -l force
+
+# completions flags
+complete -c pkg -n '__pkg_using_command completions' -l shell -r -a 'bash zsh fish'
+complete -c pkg -n '__pkg_using_command completions' -l install
+
+# add/remove package name completion
+complete -c pkg -n '__pkg_using_command add' -a '(__pkg_installed_packages)' -d 'Package'
+complete -c pkg -n '__pkg_using_command remove' -a '(__pkg_manifest_packages)' -d 'Package'
+"""
+
+
+def cmd_completions(args: argparse.Namespace) -> int:
+    """``pkg completions`` — generate or install shell completion scripts."""
+    import os
+
+    shell = args.shell
+    if not shell:
+        fish = os.environ.get("PKG_SHELL") or ""
+        if not fish:
+            shell_var = os.environ.get("SHELL", "")
+            shell = Path(shell_var).name if shell_var else "bash"
+        else:
+            shell = fish
+
+    scripts = {
+        "bash": _BASH_COMPLETION,
+        "zsh": _ZSH_COMPLETION,
+        "fish": _FISH_COMPLETION,
+    }
+
+    if not args.install:
+        print(scripts[shell])
+        return 0
+
+    install_dirs = {
+        "bash": Path.home() / ".local" / "share" / "bash-completion" / "completions",
+        "zsh": Path.home() / ".local" / "share" / "zsh" / "site-functions",
+        "fish": Path.home() / ".config" / "fish" / "completions",
+    }
+
+    dest_dir = install_dirs[shell]
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if shell == "fish":
+        dest = dest_dir / "pkg.fish"
+    elif shell == "zsh":
+        dest = dest_dir / "_pkg"
+    else:
+        dest = dest_dir / "pkg"
+
+    dest.write_text(scripts[shell])
+    print(f"  {out.green('installed')} {dest}")
+    hint = {
+        "bash": "Add to ~/.bashrc:  source ~/.local/share/bash-completion/completions/pkg",
+        "zsh": "Add to ~/.zshrc:  fpath+=(~/.local/share/zsh/site-functions) && autoload -Uz compinit && compinit",
+        "fish": "Restart fish or run:  source ~/.config/fish/completions/pkg.fish",
+    }
+    print(f"  {out.dim(hint[shell])}")
+    return 0
+
+
 _CMD = {
     "diff": cmd_diff,
     "plan": cmd_diff,
@@ -681,12 +887,14 @@ _CMD = {
     "add": cmd_add,
     "remove": cmd_remove,
     "search": cmd_search,
+    "completions": cmd_completions,
 }
 
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``pkg`` CLI.  Parses args and dispatches to the subcommand."""
     parser = build_parser()
+    argcomplete.autocomplete(parser)
     args = parser.parse_args(argv)
     if not args.cmd:
         parser.print_help()
