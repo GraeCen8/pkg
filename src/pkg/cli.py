@@ -581,13 +581,14 @@ def cmd_search(args: argparse.Namespace) -> int:
     """``pkg search`` — interactive package search with add/remove/print actions."""
     from pkg import search
 
+    root_dir = find_root(args.root)
     manager = pms_mod.detect(args.manager)
+    pkg_toml = root_dir / "pkg.toml"
 
     # Get package list
     if args.installed:
         # Show only packages declared in the manifest
         try:
-            root_dir = find_root(args.root)
             manifest_pkgs = cfg.all_packages(root_dir, manager.name)
             # Filter to only packages that are actually installed
             packages = [p for p in manifest_pkgs if manager.check(p)]
@@ -636,19 +637,33 @@ def cmd_search(args: argparse.Namespace) -> int:
 
     # Execute action
     if action == "add":
+        # Install via system PM
         print(f"Installing {out.green(pkg_name)}...")
         rc, err_msg = manager.install([pkg_name])
         if rc:
             print(err.red(f"Failed to install {pkg_name}: {err_msg}"))
             return 1
         print(f"  {out.green(chr(0x2713))} {pkg_name} installed")
+        # Declare in manifest
+        before, after = cfg.add_packages(pkg_toml, [pkg_name])
+        added = [pkg_name] if pkg_name in after and pkg_name not in before else []
+        for pkg in added:
+            print(f"  {out.cyan('+')} {pkg} (declared in manifest)")
+        _manifest_commit(root_dir, added, "add")
     elif action == "remove":
+        # Uninstall via system PM
         print(f"Removing {out.red(pkg_name)}...")
         rc, err_msg = manager.remove([pkg_name])
         if rc:
             print(err.red(f"Failed to remove {pkg_name}: {err_msg}"))
             return 1
         print(f"  {out.red(chr(0x2717))} {pkg_name} removed")
+        # Remove from manifest
+        before, after = cfg.remove_packages(pkg_toml, [pkg_name])
+        removed = [pkg_name] if pkg_name in before and pkg_name not in after else []
+        for pkg in removed:
+            print(f"  {out.red('-')} {pkg} (removed from manifest)")
+        _manifest_commit(root_dir, removed, "remove")
     elif action == "print":
         print(manager.print_info(pkg_name))
 

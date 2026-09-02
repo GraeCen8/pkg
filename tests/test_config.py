@@ -378,3 +378,34 @@ def test_remove_packages_preserves_comments(tmp_path):
     assert '"d"' in content
     assert '"e"' in content
     assert '"a"' not in content
+
+
+def test_add_packages_preserves_section_comments(tmp_path):
+    text = """\
+[[system]]
+packages = [
+    "bat",
+    # apps
+    "kitty",
+    # langs
+    "python",
+    "rustup",
+    # lsps
+    "pyright",
+    "rust-analyzer",
+]
+"""
+    d = write_root(tmp_path, text)
+    cfg.add_packages(_toml(d), ["go", "zls"])
+    content = _toml(d).read_text()
+    assert "# apps" in content
+    assert "# langs" in content
+    assert "# lsps" in content
+    assert '"go"' in content
+    assert '"zls"' in content
+    # Comments should still appear between their associated packages,
+    # not be lumped together at the top
+    apps_pos = content.index("# apps")
+    langs_pos = content.index("# langs")
+    lsps_pos = content.index("# lsps")
+    assert apps_pos < langs_pos < lsps_pos

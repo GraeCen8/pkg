@@ -261,30 +261,52 @@ def _remove_block_index(data: dict, packages: list[str], active_profiles: list[s
     return None
 
 
-def _extract_array_comments(lines: list[str], start: int, end: int) -> list[str]:
-    """Extract comment lines from within a packages = [...] array range."""
+def _extract_array_comments(lines: list[str], start: int, end: int) -> list[tuple[int, str]]:
+    """Extract comment lines with their positions from within a packages = [...] array range.
+
+    Returns a list of (position, comment) tuples where position is the index
+    among the package items where the comment should be inserted.
+    """
+    item_positions = []
+    for i in range(start, end):
+        stripped = lines[i].strip()
+        if stripped.startswith("packages"):
+            # Find the range of items in the array
+            j = i
+            while "]" not in lines[j] and j + 1 < end:
+                j += 1
+            for k in range(i, j + 1):
+                s = lines[k].strip()
+                if s.startswith(('"', "'")):
+                    item_positions.append(k)
+            break
+
     comments = []
     for i in range(start, end):
         stripped = lines[i].strip()
         if stripped.startswith("#"):
-            comments.append(stripped)
+            pos = sum(1 for p in item_positions if p < i)
+            comments.append((pos, stripped))
     return comments
 
 
-def _format_packages_array(packages: list[str], comments: list[str] | None = None) -> str:
+def _format_packages_array(
+    packages: list[str], comments: list[tuple[int, str]] | None = None
+) -> str:
     """Format a packages list as single-line or multi-line TOML array.
 
     Uses multi-line format when there are more than 3 items.
-    Preserves comments from the original array.
+    Preserves comments from the original array at their original positions.
     """
     if len(packages) <= 3:
         return f"packages = {json.dumps(packages)}"
 
     items = list(packages)
     if comments:
-        items = items[: len(comments)] + comments + items[len(comments) :]
+        for offset, (pos, comment) in enumerate(comments):
+            items.insert(pos + offset, comment)
     indent = "    "
-    inner = "\n".join(f'{indent}"{p}",' for p in items)
+    inner = "\n".join(f'{indent}"{p}",' if not p.startswith("#") else f"{indent}{p}" for p in items)
     return f"packages = [\n{inner}\n]"
 
 
